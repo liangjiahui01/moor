@@ -128,13 +128,10 @@
     <string name="k_kill_line">Kill line</string>
     <string name="k_kill_word">Kill word</string>
     <string name="k_details">Details</string>
-    <string name="k_paste">Paste</string>
-    <string name="k_input">Input box</string>
     <string name="k_reconnect">Reconnect</string>
     <string name="k_settings">Settings</string>
     <string name="k_font_size">Font size</string>
-    <string name="input_hint">Type or dictate, then send</string>
-    <string name="input_fill">Fill only</string>
+    <string name="input_hint">Type a command…</string>
     <string name="input_send">Send</string>
 
     <!-- settings -->
@@ -215,8 +212,6 @@
     <string name="a11y_voice">Voice input</string>
     <string name="voice_listening">Listening…</string>
     <string name="voice_finishing">Recognizing…</string>
-    <string name="voice_insert">Insert</string>
-    <string name="voice_send">Send</string>
     <string name="voice_setup_title">Set up voice input</string>
     <string name="voice_setup_body">Voice input uses Volcengine\'s Doubao streaming speech recognition with your own key. Add it in Settings, Voice input.</string>
     <string name="voice_open_settings">Open Settings</string>

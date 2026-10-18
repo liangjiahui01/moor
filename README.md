@@ -22,9 +22,9 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 | Several machines | Add as many machines as you like and switch between them from the top of the session list. Each one remembers its last session. |
 | Notifications | Claude Code "needs your input" and "finished" (with its last reply), plus an optional terminal bell from any program. |
 | One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. |
-| Voice input | Tap the mic key and talk: the text appears live above the keys, then insert it or send it, without opening the keyboard. Uses Volcengine (Doubao) streaming speech recognition with your own key. |
+| Voice input | Tap the mic beside the input box and talk: the text appears in the box as you speak, ready to edit and send, without opening the keyboard. Uses Volcengine (Doubao) streaming speech recognition with your own key. |
 | Images | Send a photo or screenshot to the session (photos, camera, or share from another app). It is copied to the machine and its path typed in, which Claude Code reads as an image. |
-| Phone-first keys | One row of full-size keys that scrolls sideways (most used first; voice, keyboard and the sheet stay put), swipe up on a key for its second function, a sheet with symbols, Ctrl combos, paste and an input box for dictation. |
+| Phone-first input | Two rows at the bottom: named keys that scroll sideways (Paste, Esc, Tab, Enter, Shift+Tab, arrows, Ctrl, Alt, …), and an input box where you type or dictate a whole line with the normal keyboard, then send it. A sheet holds symbols and Ctrl combos; the keyboard key types straight into the terminal. |
 | Light and dark | Follows the system, or pick one. |
 | Ghostty look | Catppuccin Mocha / Latte colors, JetBrains Mono with symbol and Nerd Font icons, bar cursor; Chinese glyphs sit centred in two columns. |
 

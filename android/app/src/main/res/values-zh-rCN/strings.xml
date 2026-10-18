@@ -115,13 +115,10 @@
     <string name="k_kill_line">删整行</string>
     <string name="k_kill_word">删词</string>
     <string name="k_details">详情</string>
-    <string name="k_paste">粘贴</string>
-    <string name="k_input">输入框</string>
     <string name="k_reconnect">重连</string>
     <string name="k_settings">设置</string>
     <string name="k_font_size">字号</string>
-    <string name="input_hint">打字或语音输入，再发送</string>
-    <string name="input_fill">只填入</string>
+    <string name="input_hint">输入命令…</string>
     <string name="input_send">发送</string>
 
     <string name="welcome_title">欢迎使用 Moor</string>
@@ -199,8 +196,6 @@
     <string name="a11y_voice">语音输入</string>
     <string name="voice_listening">正在听…</string>
     <string name="voice_finishing">正在识别…</string>
-    <string name="voice_insert">插入</string>
-    <string name="voice_send">发送</string>
     <string name="voice_setup_title">设置语音输入</string>
     <string name="voice_setup_body">语音输入用火山引擎的豆包流式语音识别，需要你自己的密钥，在 设置 › 语音输入 里填写。</string>
     <string name="voice_open_settings">去设置</string>

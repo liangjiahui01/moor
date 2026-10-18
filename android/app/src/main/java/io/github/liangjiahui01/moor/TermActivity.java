@@ -39,9 +39,7 @@ import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
 
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 public class TermActivity extends Activity implements TerminalViewClient, TerminalSessionClient, TermService.Screen,
@@ -315,14 +313,16 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         }
     };
 
-    // ---- key bar ----
-    // One row: keys that scroll sideways (most used first, each wide enough to hit), then voice, keyboard and
-    // the sheet with symbols, Ctrl combos and actions, which stay put. Swipe up on a key for the small label in
-    // its corner. On a wide screen the scrolling keys all fit and share the space.
+    // ---- bottom: a row of keys that scrolls sideways, and an input box (as in Orca) ----
+    // Keys: keyboard straight into the terminal, the sheet (symbols, Ctrl combos, font), then named keys, most used
+    // first. Input box: type or dictate a whole line with the normal keyboard, then send it with Enter.
 
-    private static final String[] SCROLL_KEYS = {"ESC", "⏎", "↑", "↓", "←", "→", "TAB", "CTRL", "ALT",
-        "HOME", "END", "PGUP", "PGDN", "/", "-", "|", "~"};
-    private static final String[] FIXED_KEYS = {"🎤", "⌨", "⋯"};
+    /** Label on the key → key pressed. */
+    private static final String[][] STRIP = {
+        {"Paste", "PASTE"}, {"Esc", "ESC"}, {"Tab", "TAB"}, {"Enter", "⏎"}, {"Shift+Tab", "⇧TAB"},
+        {"↑", "↑"}, {"↓", "↓"}, {"←", "←"}, {"→", "→"}, {"Ctrl", "CTRL"}, {"Alt", "ALT"}, {"^C", "^C"},
+        {"Home", "HOME"}, {"End", "END"}, {"PgUp", "PGUP"}, {"PgDn", "PGDN"},
+    };
     private static final String[][] SYMBOLS = {
         {"/", "-", "_", "|", "~", "`", "=", "\\", "$", "&"},
         {"'", "\"", "<", ">", "(", ")", "[", "]", "{", "}"},
@@ -331,91 +331,165 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private static final int[] CTRL_LABELS = {R.string.k_interrupt, R.string.k_eof, R.string.k_history, R.string.k_clear,
         R.string.k_suspend, R.string.k_line_start, R.string.k_line_end, R.string.k_kill_line, R.string.k_kill_word,
         R.string.k_details};
-    private static final Map<String, String> UP = new HashMap<>();
     private static final Set<String> REPEAT = new HashSet<>(Arrays.asList("←", "↓", "↑", "→", "PGUP", "PGDN"));
-    static {
-        UP.put("ESC", "^C");
-        UP.put("TAB", "⇧TAB");
-        UP.put("←", "HOME");
-        UP.put("→", "END");
-        UP.put("↑", "PGUP");
-        UP.put("↓", "PGDN");
-    }
+
+    private EditText input;
+    private long inputBlurAt;
+    private View sendBtn;
 
     private void buildKeys() {
+        String typed = input != null ? input.getText().toString() : "";
         keyArea.removeAllViews();
         ctrlKey = altKey = null;
         moreKey = micKey = null;
         morePanel = buildMorePanel();
         morePanel.setVisibility(View.GONE);
         keyArea.addView(morePanel);
-        if (voiceBar == null) buildVoiceBar();
-        if (voiceBar.getParent() != null) ((android.view.ViewGroup) voiceBar.getParent()).removeView(voiceBar);
-        keyArea.addView(voiceBar);
-        LinearLayout row = Ui.row(this);
-        row.setPadding(dp(3.5f), dp(3), dp(6), dp(3));
 
         android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
         scroller.setHorizontalScrollBarEnabled(false);
         scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroller.setFillViewport(true);
-        // A soft fade at the edges shows there is more to scroll to
         scroller.setHorizontalFadingEdgeEnabled(true);
         scroller.setFadingEdgeLength(dp(18));
         LinearLayout strip = Ui.row(this);
-        for (String k : SCROLL_KEYS) {
-            // 44 dp each; weight shares out any spare width when they all fit
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(34), 1f);
-            lp.setMargins(dp(2.5f), 0, dp(2.5f), 0);
-            strip.addView(keyCell(k, false), lp);
-        }
-        scroller.addView(strip, new android.widget.FrameLayout.LayoutParams(-2, -1));
-        row.addView(scroller, new LinearLayout.LayoutParams(0, dp(34), 1f));
+        strip.setPadding(dp(6), dp(6), dp(6), dp(4));
+        strip.addView(iconKey(R.drawable.ic_keyboard, R.string.a11y_keyboard, "⌨"), pillLp(dp(46)));
+        strip.addView(pillKey("»", "⋯"), pillLp(dp(46)));
+        for (String[] k : STRIP) strip.addView(pillKey(k[0], k[1]), pillLp(-2));
+        scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
+        keyArea.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
 
-        View sep = new View(this);
-        sep.setBackgroundColor(t.line);
-        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(dp(1), dp(22));
-        sl.setMargins(dp(3), 0, dp(3), 0);
-        row.addView(sep, sl);
-        for (String k : FIXED_KEYS) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(42), dp(34));
-            lp.setMargins(dp(2.5f), 0, 0, 0);
-            row.addView(keyCell(k, false), lp);
-        }
-        keyArea.addView(row);
+        keyArea.addView(buildInputBar(typed));
         refreshToggles();
     }
 
+    private LinearLayout.LayoutParams pillLp(int width) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(width, dp(36));
+        lp.setMargins(dp(3), 0, dp(3), 0);
+        return lp;
+    }
+
+    private android.graphics.drawable.Drawable keyBg(boolean on) {
+        return on ? Ui.round(t.accent, dp(10)) : t.dark ? Ui.round(t.key, dp(10)) : Ui.outline(t.key, t.line, dp(1), dp(10));
+    }
+
+    /** A key with a name on it, as wide as its name. */
+    private View pillKey(String label, String key) {
+        FrameLayout cell = new FrameLayout(this);
+        cell.setBackground(keyBg(false));
+        TextView b = Ui.text(this, label, 13.5f, t.text, Ui.REGULAR);
+        b.setTypeface(Ui.mono(this));
+        b.setGravity(Gravity.CENTER);
+        b.setMinWidth(dp(46));
+        b.setPadding(dp(13), 0, dp(13), 0);
+        cell.addView(b, new FrameLayout.LayoutParams(-2, -1));
+        if (key.equals("CTRL")) ctrlKey = b;
+        if (key.equals("ALT")) altKey = b;
+        if (key.equals("⋯")) {
+            moreKey = cell;
+            cell.setContentDescription(getString(R.string.a11y_more_keys));
+        }
+        bindKey(cell, null, key, null, false);
+        return cell;
+    }
+
+    private View iconKey(int icon, int a11y, String key) {
+        FrameLayout cell = new FrameLayout(this);
+        cell.setBackground(keyBg(false));
+        cell.addView(Ui.icon(this, icon, t.text, 19), new FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER));
+        cell.setContentDescription(getString(a11y));
+        bindKey(cell, null, key, null, false);
+        return cell;
+    }
+
+    /** Symbols in the sheet: plain square keys. */
     private View keyCell(String k, boolean inPanel) {
         FrameLayout cell = new FrameLayout(this);
-        cell.setBackground(Ui.round(t.key, dp(10)));
-        if (!t.dark) cell.setBackground(Ui.outline(t.key, t.line, dp(1), dp(10)));
-        if (k.equals("⌨") || k.equals("⋯") || k.equals("🎤")) {
-            int res = k.equals("⌨") ? R.drawable.ic_keyboard : k.equals("🎤") ? R.drawable.ic_mic : R.drawable.ic_more;
-            android.widget.ImageView i = Ui.icon(this, res, t.text, 18);
-            cell.addView(i, new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER));
-            cell.setContentDescription(getString(k.equals("⌨") ? R.string.a11y_keyboard
-                : k.equals("🎤") ? R.string.a11y_voice : R.string.a11y_more_keys));
-            if (k.equals("⋯")) moreKey = cell;
-            if (k.equals("🎤")) micKey = cell;
-            bindKey(cell, null, k, null, inPanel);
-            return cell;
-        }
+        cell.setBackground(keyBg(false));
         TextView b = Ui.text(this, k, keySize(k), t.text, Ui.MEDIUM);
         b.setTypeface(Ui.mono(this));
         b.setGravity(Gravity.CENTER);
         cell.addView(b, new FrameLayout.LayoutParams(-1, -1));
-        String up = UP.get(k);
-        if (up != null) {
-            TextView hint = Ui.text(this, up.equals("⇧TAB") ? "⇧" : up, 7.5f, t.faint, Ui.REGULAR);
-            hint.setPadding(0, dp(2), dp(3), 0);
-            hint.setSingleLine(true); // twelve keys leave little room: never wrap "HOME"
-            cell.addView(hint, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END));
-        }
-        if (k.equals("CTRL")) ctrlKey = b;
-        if (k.equals("ALT")) altKey = b;
-        bindKey(cell, b, k, up, inPanel);
+        bindKey(cell, b, k, null, inPanel);
         return cell;
+    }
+
+    /** The input box with image, voice and send buttons beside it. */
+    private View buildInputBar(String typed) {
+        LinearLayout bar = Ui.row(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(8), dp(4), dp(8), dp(8));
+        input = new EditText(this);
+        input.setText(typed);
+        input.setSelection(typed.length());
+        input.setHint(R.string.input_hint);
+        input.setTextColor(t.text);
+        input.setHintTextColor(t.faint);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        input.setTypeface(Ui.mono(this));
+        input.setPadding(dp(16), dp(10), dp(16), dp(10));
+        input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
+        // One line that wraps (up to four), with Send on the keyboard's Enter key
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
+        input.setHorizontallyScrolling(false);
+        input.setMaxLines(4);
+        input.setMinHeight(dp(44));
+        input.setOnFocusChangeListener((v, has) -> {
+            if (!has) inputBlurAt = android.os.SystemClock.uptimeMillis();
+        });
+        input.setOnEditorActionListener((v, action, ev) -> {
+            boolean enter = ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER && ev.getAction() == KeyEvent.ACTION_DOWN;
+            if (action == android.view.inputmethod.EditorInfo.IME_ACTION_SEND || enter) {
+                sendInput();
+                return true;
+            }
+            return false;
+        });
+        bar.addView(input, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        View image = roundButton(R.drawable.ic_image, R.string.k_image, false, v -> showImageSource());
+        bar.addView(image, roundLp());
+        micKey = roundButton(R.drawable.ic_mic, R.string.a11y_voice, false, v -> toggleVoice());
+        bar.addView(micKey, roundLp());
+        sendBtn = roundButton(R.drawable.ic_arrow_up, R.string.input_send, true, v -> sendInput());
+        bar.addView(sendBtn, roundLp());
+        return bar;
+    }
+
+    private LinearLayout.LayoutParams roundLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        lp.leftMargin = dp(8);
+        return lp;
+    }
+
+    private View roundButton(int icon, int a11y, boolean primary, View.OnClickListener l) {
+        FrameLayout b = new FrameLayout(this);
+        b.setBackground(Ui.pressable(t, primary ? Ui.round(t.accent, dp(22))
+            : t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)), dp(22)));
+        b.addView(Ui.icon(this, icon, primary ? t.onAccent : t.text, 20), new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER));
+        b.setContentDescription(getString(a11y));
+        b.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+            l.onClick(v);
+        });
+        return b;
+    }
+
+    /** Sends the box's text and Enter; with an empty box, just Enter. */
+    private void sendInput() {
+        if (voice != null) {
+            voice.cancel();
+            endVoice();
+        }
+        String text = input.getText().toString();
+        input.setText("");
+        if (text.trim().isEmpty()) {
+            pressKey("⏎");
+        } else {
+            sendText(text, true);
+        }
     }
 
     private static float keySize(String k) {
@@ -473,9 +547,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
         LinearLayout actions = Ui.row(this);
         actions.setPadding(0, dp(8), 0, 0);
-        actions.addView(actionTile(R.drawable.ic_paste, R.string.k_paste, () -> onPasteTextFromClipboard(service.term)), tileLp());
-        actions.addView(actionTile(R.drawable.ic_input, R.string.k_input, this::showInputBox), tileLp());
-        actions.addView(actionTile(R.drawable.ic_image, R.string.k_image, this::showImageSource), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
         p.addView(actions);
@@ -621,7 +692,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             case "ALT": altOn = !altOn; refreshToggles(); return;
             case "⌨": toggleKeyboard(); return;
             case "⋯": setMore(morePanel.getVisibility() != View.VISIBLE); return;
-            case "🎤": toggleVoice(); return;
+            case "PASTE": onPasteTextFromClipboard(s); return;
             case "⇧TAB": s.write(new byte[]{27, '[', 'Z'}, 0, 3); return;
         }
         if (k.length() == 2 && k.charAt(0) == '^' && k.charAt(1) >= 'A' && k.charAt(1) <= 'Z') {
@@ -660,8 +731,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         styleToggle(altKey, altOn);
         if (micKey != null) {
             boolean on = voice != null;
-            micKey.setBackground(on ? Ui.round(t.accent, dp(10))
-                : t.dark ? Ui.round(t.key, dp(10)) : Ui.outline(t.key, t.line, dp(1), dp(10)));
+            micKey.setBackground(on ? Ui.round(t.red, dp(22))
+                : t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
             View icon = ((FrameLayout) micKey).getChildAt(0);
             if (icon instanceof android.widget.ImageView) {
                 ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
@@ -669,21 +740,16 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         }
         if (moreKey != null) {
             boolean open = morePanel != null && morePanel.getVisibility() == View.VISIBLE;
-            moreKey.setBackground(open ? Ui.round(t.accent, dp(10))
-                : t.dark ? Ui.round(t.key, dp(10)) : Ui.outline(t.key, t.line, dp(1), dp(10)));
-            View icon = ((FrameLayout) moreKey).getChildAt(0);
-            if (icon instanceof android.widget.ImageView) {
-                ((android.widget.ImageView) icon).setImageResource(open ? R.drawable.ic_chevron_down : R.drawable.ic_more);
-                ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(open ? t.onAccent : t.text));
-            }
+            moreKey.setBackground(keyBg(open));
+            View label = ((FrameLayout) moreKey).getChildAt(0);
+            if (label instanceof TextView) ((TextView) label).setTextColor(open ? t.onAccent : t.text);
         }
     }
 
     private void styleToggle(TextView key, boolean on) {
         if (key == null) return;
         View cell = (View) key.getParent();
-        cell.setBackground(on ? Ui.round(t.accent, dp(10))
-            : t.dark ? Ui.round(t.key, dp(10)) : Ui.outline(t.key, t.line, dp(1), dp(10)));
+        cell.setBackground(keyBg(on));
         key.setTextColor(on ? t.onAccent : t.text);
     }
 
@@ -694,51 +760,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (Theme.get(this).dark != themeDark) recreate();
     }
 
-    // ---- input box: type a whole message with the full keyboard (suggestions, voice), then send it ----
-
-    private String draft = "";
-
-    private void showInputBox() {
-        LinearLayout box = Ui.column(this);
-        EditText e = new EditText(this);
-        e.setText(draft);
-        e.setSelection(draft.length());
-        e.setMinLines(3);
-        e.setMaxLines(8);
-        e.setGravity(Gravity.TOP | Gravity.START);
-        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        e.setHint(R.string.input_hint);
-        e.setTextColor(t.text);
-        e.setHintTextColor(t.faint);
-        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        e.setPadding(dp(14), dp(12), dp(14), dp(12));
-        e.setBackground(Ui.outline(t.bg, t.accent, dp(1.5f), dp(14)));
-        box.addView(e, Ui.lp(-1, -2));
-        LinearLayout buttons = Ui.row(this);
-        buttons.setPadding(0, dp(14), 0, 0);
-        box.addView(buttons);
-        Dialog d = Ui.bottomSheet(this, t, box);
-        TextView fill = Ui.secondaryButton(this, t, getString(R.string.input_fill), v -> {
-            sendText(e.getText().toString(), false);
-            d.dismiss();
-        });
-        buttons.addView(fill, new LinearLayout.LayoutParams(0, dp(50), 1f));
-        TextView send = Ui.primaryButton(this, t, getString(R.string.input_send), v -> {
-            sendText(e.getText().toString(), true);
-            d.dismiss();
-        });
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, dp(50), 2f);
-        slp.leftMargin = dp(10);
-        buttons.addView(send, slp);
-        d.setOnCancelListener(x -> draft = e.getText().toString());
-        d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
-            | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        d.show();
-        e.requestFocus();
-    }
-
     private void sendText(String text, boolean enter) {
-        draft = "";
         if (service == null) return;
         TerminalSession s = service.term;
         if (!text.isEmpty() && s.getEmulator() != null) s.getEmulator().paste(text);
@@ -772,44 +794,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private static final int REQ_MIC = 2, REQ_PICK = 3, REQ_CAMERA = 4;
     private VoiceInput voice;
-    /** What happens to the transcript when recognition ends: 0 drop, 1 insert, 2 insert and press Enter. */
-    private int voiceMode;
-    private LinearLayout voiceBar;
-    private TextView voiceText;
-    private View voiceDot;
+    /** The box's text when dictation started; the transcript goes after it. */
+    private String voiceBase = "";
 
-    private void buildVoiceBar() {
-        voiceBar = Ui.row(this);
-        voiceBar.setGravity(Gravity.CENTER_VERTICAL);
-        voiceBar.setPadding(dp(14), dp(10), dp(8), dp(4));
-        voiceBar.setVisibility(View.GONE);
-        voiceDot = new View(this);
-        voiceDot.setBackground(Ui.round(t.red, dp(6)));
-        voiceBar.addView(voiceDot, Ui.lp(dp(11), dp(11)));
-        voiceText = Ui.text(this, "", 15, t.text, Ui.REGULAR);
-        voiceText.setHintTextColor(t.faint);
-        voiceText.setMaxLines(4);
-        voiceText.setEllipsize(TextUtils.TruncateAt.START);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, -2, 1f);
-        tlp.setMargins(dp(10), 0, dp(8), 0);
-        voiceBar.addView(voiceText, tlp);
-        TextView cancel = smallButton("✕", this::cancelVoice);
-        cancel.setContentDescription(getString(R.string.cancel));
-        voiceBar.addView(cancel, Ui.lp(dp(38), dp(36)));
-        TextView insert = Ui.secondaryButton(this, t, getString(R.string.voice_insert), v -> finishVoice(1));
-        LinearLayout.LayoutParams ilp = Ui.lp(-2, dp(36));
-        ilp.leftMargin = dp(6);
-        voiceBar.addView(insert, ilp);
-        TextView send = Ui.primaryButton(this, t, getString(R.string.voice_send), v -> finishVoice(2));
-        send.setPadding(dp(14), 0, dp(14), 0);
-        LinearLayout.LayoutParams slp = Ui.lp(-2, dp(36));
-        slp.leftMargin = dp(6);
-        voiceBar.addView(send, slp);
-    }
-
+    /** The mic button: starts dictation into the input box; a second tap stops it. */
     private void toggleVoice() {
         if (voice != null) {
-            finishVoice(1);
+            input.setHint(R.string.voice_finishing);
+            voice.stop();
             return;
         }
         if (!VoiceInput.Config.load(this).usable()) {
@@ -824,27 +816,25 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     }
 
     private void startVoice() {
-        voiceMode = 0;
-        voiceText.setText("");
-        voiceText.setHint(R.string.voice_listening);
-        voiceBar.setVisibility(View.VISIBLE);
+        voiceBase = input.getText().toString();
+        input.setHint(R.string.voice_listening);
         voice = new VoiceInput(this, new VoiceInput.Listener() {
             @Override
             public void onText(String text) {
-                voiceText.setText(text);
+                showTranscript(text);
             }
 
             @Override
             public void onLevel(float level) {
-                float s = 1f + level * 0.9f;
-                voiceDot.animate().scaleX(s).scaleY(s).setDuration(90).start();
+                if (micKey == null) return;
+                float s = 1f + level * 0.18f;
+                micKey.animate().scaleX(s).scaleY(s).setDuration(90).start();
             }
 
             @Override
             public void onDone(String text) {
-                int mode = voiceMode;
+                showTranscript(text);
                 endVoice();
-                if (mode != 0 && !text.trim().isEmpty()) sendText(text.trim(), mode == 2);
             }
 
             @Override
@@ -857,14 +847,13 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         refreshToggles();
     }
 
-    /** Stops listening; the transcript is inserted (mode 1) or inserted and sent (mode 2) once it is final. */
-    private void finishVoice(int mode) {
-        if (voice == null) return;
-        voiceMode = mode;
-        voiceText.setHint(R.string.voice_finishing);
-        voice.stop();
+    private void showTranscript(String text) {
+        String s = voiceBase + text;
+        input.setText(s);
+        input.setSelection(s.length());
     }
 
+    /** Stops dictation; what was recognised so far stays in the box. */
     private void cancelVoice() {
         if (voice == null) return;
         voice.cancel();
@@ -873,8 +862,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private void endVoice() {
         voice = null;
-        voiceDot.animate().cancel();
-        voiceBar.setVisibility(View.GONE);
+        if (micKey != null) micKey.animate().cancel();
+        if (micKey != null) {
+            micKey.setScaleX(1f);
+            micKey.setScaleY(1f);
+        }
+        input.setHint(R.string.input_hint);
         refreshToggles();
     }
 
@@ -1099,7 +1092,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             && service.state() != TermService.State.CONNECTING) {
             service.retryNow();
         }
-        // Tapping doesn't open the keyboard, so reading isn't interrupted; the keyboard key does
+        // Tapping doesn't open the keyboard, so reading isn't interrupted; the keyboard key does.
+        // A tap while typing in the input box puts the keyboard away. The terminal has already taken the focus
+        // by now, so look at when the box lost it.
+        if (android.os.SystemClock.uptimeMillis() - inputBlurAt < 500) {
+            getSystemService(InputMethodManager.class).hideSoftInputFromWindow(view.getWindowToken(), 0);
+        }
         view.requestFocus();
     }
 
