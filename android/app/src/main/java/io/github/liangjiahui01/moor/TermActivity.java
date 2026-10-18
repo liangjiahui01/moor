@@ -148,6 +148,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         keyArea.setBackgroundColor(t.keyBar);
         buildKeys();
         root.addView(keyArea, new LinearLayout.LayoutParams(-1, -2));
+        buildBubble();
+        minimal = Prefs.raw(this).getBoolean("minimal", false);
+        applyMinimal();
 
         FrameLayout top = new FrameLayout(this);
         top.addView(root, new FrameLayout.LayoutParams(-1, -1));
@@ -471,6 +474,11 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         input.setPadding(dp(16), dp(10), dp(16), dp(10));
         input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
         input.setOnTouchListener(this::onInputTouch);
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a, int b, int d) {}
+            @Override public void onTextChanged(CharSequence c, int a, int b, int d) {}
+            @Override public void afterTextChanged(android.text.Editable e) { styleBubble(); }
+        });
         // A single line that scrolls sideways as text grows (dictation included), so the bar never
         // changes height; Send on the keyboard's Enter key
         input.setInputType(InputType.TYPE_CLASS_TEXT);
@@ -522,7 +530,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (voice != null) {
             // Still dictating (locked): let the last words land, then send
             sendWhenDone = true;
-            input.setHint(R.string.voice_finishing);
+            setInputHint(R.string.voice_finishing);
             voice.stop();
             return;
         }
@@ -592,6 +600,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         actions.setPadding(0, dp(8), 0, 0);
         actions.addView(actionTile(R.drawable.ic_topbar, showTopBar ? R.string.k_hide_bar : R.string.k_show_bar,
             this::toggleTopBar), tileLp());
+        actions.addView(actionTile(R.drawable.ic_minimal, R.string.k_minimal, this::toggleMinimal), tileLp());
         actions.addView(actionTile(R.drawable.ic_redraw, R.string.k_redraw, () -> service.redraw()), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
@@ -855,7 +864,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             case MotionEvent.ACTION_DOWN:
                 if (locked && voice != null) {
                     // Tap while locked: stop listening, keep the text for editing
-                    input.setHint(R.string.voice_finishing);
+                    setInputHint(R.string.voice_finishing);
                     voice.stop();
                     return false;
                 }
@@ -920,11 +929,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     }
 
     private void styleHold() {
+        styleBubble();
         if (voice == null) return;
-        int hint = locked ? R.string.hold_locked : holdCancel ? R.string.hold_cancel
+        int hint = locked ? (minimal ? R.string.hold_locked_bubble : R.string.hold_locked) : holdCancel ? R.string.hold_cancel
             : holdLock ? R.string.hold_lock : R.string.hold_send;
         if (holdLock && !locked) input.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-        input.setHint(hint);
+        setInputHint(hint);
         input.setBackground(Ui.outline(t.key, holdCancel ? t.red : t.accent, dp(2), dp(22)));
     }
 
@@ -935,7 +945,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         }
         if (send) {
             sendWhenDone = true;
-            input.setHint(R.string.voice_finishing);
+            setInputHint(R.string.voice_finishing);
             voice.stop();
         } else {
             voice.cancel();
@@ -951,7 +961,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private void startVoice() {
         voiceBase = input.getText().toString();
-        input.setHint(R.string.voice_listening);
+        setInputHint(R.string.voice_listening);
         voice = new VoiceInput(this, new VoiceInput.Listener() {
             @Override
             public void onText(String text) {
@@ -960,9 +970,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
             @Override
             public void onLevel(float level) {
-                if (sendBtn == null) return;
                 float s = 1f + level * 0.18f;
-                sendBtn.animate().scaleX(s).scaleY(s).setDuration(90).start();
+                View pulse = minimal ? bubble : sendBtn;
+                if (pulse != null) pulse.animate().scaleX(s).scaleY(s).setDuration(90).start();
             }
 
             @Override
@@ -1007,7 +1017,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             sendBtn.setScaleY(1f);
         }
         resetInputLook();
-        input.setHint(R.string.input_hint);
+        setInputHint(R.string.input_hint);
+        if (bubble != null) {
+            bubble.animate().cancel();
+            bubble.setScaleX(1f);
+            bubble.setScaleY(1f);
+        }
         refreshToggles();
     }
 
@@ -1038,6 +1053,253 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (results.length == 0 || results[0] != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, R.string.voice_no_permission, Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void setInputHint(int res) {
+        input.setHint(res);
+        styleBubble();
+    }
+
+    // ---- minimal mode: no bars, the whole screen is terminal; a mic bubble that can sit anywhere.
+    // Hold it to talk (same gestures as the input box), press and move to drag it, tap it for a menu. ----
+
+    private boolean minimal, bubbleDrag;
+    private FrameLayout bubble;
+    private TextView bubblePreview;
+    private float bubbleX0, bubbleY0;
+    private final Runnable bubbleHoldStart = this::startBubbleHold;
+
+    private void buildBubble() {
+        bubble = new FrameLayout(this);
+        bubble.addView(Ui.icon(this, R.drawable.ic_mic, t.text, 24), new FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER));
+        bubble.setContentDescription(getString(R.string.a11y_bubble));
+        bubble.setElevation(dp(6));
+        bubble.setOnTouchListener(this::onBubbleTouch);
+        termBox.addView(bubble, new FrameLayout.LayoutParams(dp(56), dp(56)));
+        bubblePreview = Ui.text(this, "", 14, t.text, Ui.REGULAR);
+        bubblePreview.setBackground(Ui.outline(t.sheet, t.accent, dp(1), dp(14)));
+        bubblePreview.setPadding(dp(14), dp(10), dp(14), dp(10));
+        bubblePreview.setLineSpacing(dp(3), 1f);
+        bubblePreview.setElevation(dp(6));
+        bubblePreview.setVisibility(View.GONE);
+        termBox.addView(bubblePreview, new FrameLayout.LayoutParams(-2, -2));
+        // Keep its spot (as a share of the free space) through rotation and the keyboard opening
+        termBox.addOnLayoutChangeListener((v, l, tp, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol || b - tp != ob - ot) placeBubble();
+        });
+        styleBubble();
+    }
+
+    private void toggleMinimal() {
+        minimal = !minimal;
+        Prefs.put(this, "minimal", minimal);
+        setMore(false);
+        if (minimal) {
+            cancelVoice();
+            getSystemService(InputMethodManager.class).hideSoftInputFromWindow(input.getWindowToken(), 0);
+        }
+        applyMinimal();
+    }
+
+    private void applyMinimal() {
+        keyArea.setVisibility(minimal ? View.GONE : View.VISIBLE);
+        bubble.setVisibility(minimal ? View.VISIBLE : View.GONE);
+        getWindow().setNavigationBarColor(minimal ? t.terminalBg() : t.keyBar);
+        styleBubble();
+        termBox.post(this::placeBubble);
+    }
+
+    private void placeBubble() {
+        if (bubble == null) return;
+        int w = termBox.getWidth(), h = termBox.getHeight(), s = dp(56), m = dp(10);
+        if (w == 0 || h == 0) return;
+        float fx = Prefs.raw(this).getFloat("bubble_x", 0.92f), fy = Prefs.raw(this).getFloat("bubble_y", 0.86f);
+        bubble.setX(m + fx * Math.max(0, w - s - 2 * m));
+        bubble.setY(m + fy * Math.max(0, h - s - 2 * m));
+        placePreview();
+    }
+
+    private void moveBubble(float x, float y) {
+        int w = termBox.getWidth(), h = termBox.getHeight(), s = dp(56), m = dp(10);
+        bubble.setX(Math.max(m, Math.min(x, w - s - m)));
+        bubble.setY(Math.max(m, Math.min(y, h - s - m)));
+        placePreview();
+    }
+
+    private void saveBubble() {
+        int w = termBox.getWidth(), h = termBox.getHeight(), s = dp(56), m = dp(10);
+        float fx = w - s - 2 * m > 0 ? (bubble.getX() - m) / (w - s - 2 * m) : 0.92f;
+        float fy = h - s - 2 * m > 0 ? (bubble.getY() - m) / (h - s - 2 * m) : 0.86f;
+        Prefs.raw(this).edit().putFloat("bubble_x", Math.max(0, Math.min(1, fx)))
+            .putFloat("bubble_y", Math.max(0, Math.min(1, fy))).apply();
+    }
+
+    /** The bubble's look follows dictation; while talking, a card next to it shows the hint and the words. */
+    private void styleBubble() {
+        if (bubble == null || input == null) return;
+        boolean on = voice != null;
+        int fill = holdCancel && holding ? t.red : on ? t.accent : (t.key & 0x00ffffff) | 0xe6000000;
+        bubble.setBackground(on ? Ui.round(fill, dp(28)) : Ui.outline(fill, t.line, dp(1), dp(28)));
+        View icon = bubble.getChildAt(0);
+        if (icon instanceof android.widget.ImageView) {
+            ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
+        }
+        if (!minimal || !on) {
+            bubblePreview.setVisibility(View.GONE);
+            return;
+        }
+        String hint = input.getHint() == null ? "" : input.getHint().toString();
+        String text = input.getText().toString();
+        // The latest words matter most: keep the tail of a long transcript
+        if (text.length() > 140) text = "…" + text.substring(text.length() - 140);
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder(hint);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(holdCancel && holding ? t.red : t.faint), 0, hint.length(), 0);
+        sb.setSpan(new android.text.style.RelativeSizeSpan(0.85f), 0, hint.length(), 0);
+        if (!text.isEmpty()) sb.append("\n").append(text);
+        bubblePreview.setText(sb);
+        bubblePreview.setVisibility(View.VISIBLE);
+        placePreview();
+    }
+
+    private void placePreview() {
+        if (bubblePreview == null || bubblePreview.getVisibility() != View.VISIBLE) return;
+        int w = termBox.getWidth(), gap = dp(10), m = dp(12);
+        if (w == 0) return;
+        bubblePreview.measure(View.MeasureSpec.makeMeasureSpec(Math.min(w - 2 * m, dp(420)), View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.UNSPECIFIED);
+        int pw = bubblePreview.getMeasuredWidth(), ph = bubblePreview.getMeasuredHeight();
+        float cx = bubble.getX() + dp(28);
+        bubblePreview.setX(Math.max(m, Math.min(cx - pw / 2f, w - m - pw)));
+        // Above the bubble when there is room, else below it
+        float above = bubble.getY() - gap - ph;
+        bubblePreview.setY(above >= m ? above : bubble.getY() + dp(56) + gap);
+    }
+
+    private boolean onBubbleTouch(View v, MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                bubbleDrag = false;
+                holding = false;
+                holdCancel = false;
+                holdLock = false;
+                holdX = e.getRawX();
+                holdY = e.getRawY();
+                bubbleX0 = bubble.getX();
+                bubbleY0 = bubble.getY();
+                if (voice == null) main.postDelayed(bubbleHoldStart, 350);
+                return true;
+            case MotionEvent.ACTION_MOVE: {
+                float dx = e.getRawX() - holdX, dy = e.getRawY() - holdY;
+                if (holding) {
+                    boolean c = -dy > dp(60);
+                    boolean l = !c && dx > dp(60);
+                    if (c != holdCancel || l != holdLock) {
+                        holdCancel = c;
+                        holdLock = l;
+                        styleHold();
+                    }
+                    return true;
+                }
+                if (voice != null) return true;
+                if (!bubbleDrag && Math.hypot(dx, dy) > dp(8)) {
+                    bubbleDrag = true;
+                    main.removeCallbacks(bubbleHoldStart);
+                }
+                if (bubbleDrag) moveBubble(bubbleX0 + dx, bubbleY0 + dy);
+                return true;
+            }
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                main.removeCallbacks(bubbleHoldStart);
+                boolean up = e.getActionMasked() == MotionEvent.ACTION_UP;
+                if (bubbleDrag) {
+                    bubbleDrag = false;
+                    saveBubble();
+                    return true;
+                }
+                if (holding) {
+                    holding = false;
+                    if (up && holdLock && voice != null) {
+                        locked = true;
+                        styleHold();
+                    } else {
+                        endHold(up && !holdCancel);
+                    }
+                    return true;
+                }
+                if (!up) return true;
+                if (voice != null) {
+                    if (locked) sendInput(); // locked: a tap finishes and sends
+                } else {
+                    bubble.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                    showBubbleMenu();
+                }
+                return true;
+            }
+            default:
+                return true;
+        }
+    }
+
+    private void startBubbleHold() {
+        if (!VoiceInput.Config.load(this).usable()) {
+            showVoiceSetup();
+            return;
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC_HOLD);
+            return;
+        }
+        holding = true;
+        input.setText(""); // the box is hidden here: send only what is said now
+        bubble.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        startVoice();
+        styleHold();
+    }
+
+    /** The bubble's menu: keyboard, image, sessions, a few keys, and the way back to the bars. */
+    private void showBubbleMenu() {
+        if (service == null) return;
+        LinearLayout box = Ui.column(this);
+        Dialog[] d = new Dialog[1];
+        LinearLayout tiles = Ui.row(this);
+        tiles.addView(actionTile(R.drawable.ic_keyboard, R.string.a11y_keyboard, () -> {
+            d[0].dismiss();
+            main.postDelayed(this::toggleKeyboard, 150);
+        }), tileLp());
+        tiles.addView(actionTile(R.drawable.ic_image, R.string.k_image, () -> {
+            d[0].dismiss();
+            showImageSource();
+        }), tileLp());
+        tiles.addView(actionTile(R.drawable.ic_sessions, R.string.a11y_sessions, () -> {
+            d[0].dismiss();
+            pressKey("SESSIONS");
+        }), tileLp());
+        tiles.addView(actionTile(R.drawable.ic_minimal, R.string.k_exit_minimal, () -> {
+            d[0].dismiss();
+            toggleMinimal();
+        }), tileLp());
+        box.addView(tiles);
+        // Keys stay in the sheet, so several can be pressed in a row
+        String[][] keys = {{"Esc", "ESC"}, {"Tab", "TAB"}, {"⇧Tab", "⇧TAB"}, {"Enter", "⏎"},
+            {"↑", "↑"}, {"↓", "↓"}, {"^C", "^C"}, {"Paste", "PASTE"}};
+        LinearLayout row = Ui.row(this);
+        row.setPadding(0, dp(10), 0, 0);
+        for (String[] k : keys) {
+            TextView b = smallButton(k[0], () -> pressKey(k[1]));
+            b.setTypeface(Ui.mono(this));
+            b.setOnClickListener(v -> {
+                v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                pressKey(k[1]);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+            lp.setMargins(dp(2.5f), 0, dp(2.5f), 0);
+            row.addView(b, lp);
+        }
+        box.addView(row);
+        d[0] = Ui.bottomSheet(this, t, box);
+        d[0].getWindow().setDimAmount(0.15f); // the terminal stays readable while pressing keys
+        d[0].show();
     }
 
     // ---- images: copied to the machine, the path typed into the session ----

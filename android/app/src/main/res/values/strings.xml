@@ -264,6 +264,9 @@
     <string name="update_download">Download</string>
     <string name="update_notes">What\'s new</string>
     <string name="update_later">Later</string>
+    <string name="k_minimal">Minimal</string>
+    <string name="k_exit_minimal">Show bars</string>
+    <string name="a11y_bubble">Hold to talk, drag to move, tap for menu</string>
     <string name="k_redraw">Redraw</string>
     <string name="t_screen_on">Keep the screen on</string>
     <string name="t_screen_on_sub">While a session is open in Moor</string>
@@ -271,5 +274,6 @@
     <string name="hold_send">Release to send · ↑ cancel · → lock</string>
     <string name="hold_lock">Release to lock</string>
     <string name="hold_locked">Listening… tap send to finish</string>
+    <string name="hold_locked_bubble">Listening… tap the bubble to finish</string>
     <string name="hold_cancel">Release to cancel</string>
 </resources>
