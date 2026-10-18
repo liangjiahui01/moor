@@ -51,6 +51,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private TextView status, title, subtitle, countLabel;
     private View titleDot;
     private SessionPanel panel;
+    private View topBar;
+    private FrameLayout termBox;
+    /** The session list is up (or on its way up); it hides with an animation, so panel.shown() lags. */
+    private boolean listVisible;
+    /** Terminal without the title bar and the status bar; the session list still shows both. */
+    private boolean fullscreen;
     private TermService service;
     private int fontSize;
     private boolean ctrlOn, altOn, volCtrl;
@@ -106,9 +112,16 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
         LinearLayout root = Ui.column(this);
         root.setBackgroundColor(t.bg);
-        root.addView(buildTopBar(), new LinearLayout.LayoutParams(-1, dp(56)));
+        // In fullscreen the window covers the camera-cutout strip too, so it can be painted like the terminal
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams wa = getWindow().getAttributes();
+            wa.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(wa);
+        }
+        topBar = buildTopBar();
+        root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(56)));
 
-        FrameLayout termBox = new FrameLayout(this);
+        termBox = new FrameLayout(this);
         view = new TerminalView(this, null);
         view.setTerminalViewClient(this);
         view.setBackgroundColor(t.terminalBg());
@@ -138,6 +151,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         termBox.addView(status, slp);
         root.addView(termBox, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        fullscreen = Prefs.raw(this).getBoolean("fullscreen", false);
         keyArea = Ui.column(this);
         keyArea.setBackgroundColor(t.keyBar);
         buildKeys();
@@ -150,6 +164,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         setContentView(top);
         // No previous session: open straight into the session list
         if (Prefs.load(this).session == null) panel.show(null);
+        applyBars();
 
         fontSize = Prefs.load(this).fontSize;
         if (fontSize <= 0) fontSize = evenPx(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13,
@@ -191,6 +206,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     protected void onResume() {
         super.onResume();
+        if (topBar != null) applyBars();
         if (Theme.get(this).dark != themeDark) {
             recreate();
             return;
@@ -335,9 +351,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         morePanel.setVisibility(View.GONE);
         keyArea.addView(morePanel);
         LinearLayout row = Ui.row(this);
-        row.setPadding(dp(6), dp(8), dp(6), dp(10));
+        row.setPadding(dp(6), dp(4), dp(6), dp(5));
         for (String k : wide ? WIDE : MAIN) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1f);
             lp.setMargins(dp(2.5f), 0, dp(2.5f), 0);
             row.addView(keyCell(k, false), lp);
         }
@@ -408,9 +424,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
                 cell.setBackground(t.dark ? Ui.round(t.key, dp(9)) : Ui.outline(t.key, t.line, dp(1), dp(9)));
                 TextView a = Ui.text(this, k, 12.5f, t.text, Ui.MEDIUM);
                 a.setTypeface(Ui.mono(this));
+                a.setGravity(Gravity.CENTER);
                 cell.addView(a);
                 TextView b = Ui.text(this, getString(CTRL_LABELS[i]), 9.5f, t.faint, Ui.REGULAR);
-                b.setPadding(0, dp(3), 0, 0);
+                b.setPadding(dp(2), dp(3), dp(2), 0);
+                b.setGravity(Gravity.CENTER);
+                Ui.oneLine(b, TextUtils.TruncateAt.END);
                 cell.addView(b);
                 cell.setOnClickListener(v -> {
                     v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
@@ -429,6 +448,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         actions.addView(actionTile(R.drawable.ic_paste, R.string.k_paste, () -> onPasteTextFromClipboard(service.term)), tileLp());
         actions.addView(actionTile(R.drawable.ic_input, R.string.k_input, this::showInputBox), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
+        actions.addView(actionTile(fullscreen ? R.drawable.ic_fullscreen_exit : R.drawable.ic_fullscreen,
+            fullscreen ? R.string.k_fullscreen_exit : R.string.k_fullscreen, this::toggleFullscreen), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
         p.addView(actions);
 
@@ -453,6 +474,39 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         return l;
     }
 
+    private void toggleFullscreen() {
+        fullscreen = !fullscreen;
+        Prefs.put(this, "fullscreen", fullscreen);
+        buildKeys();
+        applyBars();
+    }
+
+    /** Hides the title bar and status bar in fullscreen while the terminal is in front. */
+    private void applyBars() {
+        boolean hide = fullscreen && !listVisible;
+        topBar.setVisibility(hide ? View.GONE : View.VISIBLE);
+        // The system keeps content clear of the camera cutout; that strip shows the window background
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(hide ? t.terminalBg() : t.bg));
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController c = getWindow().getInsetsController();
+            if (c == null) return;
+            c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            if (hide) c.hide(android.view.WindowInsets.Type.statusBars());
+            else c.show(android.view.WindowInsets.Type.statusBars());
+        } else {
+            View d = getWindow().getDecorView();
+            int f = d.getSystemUiVisibility() & ~(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            if (hide) f |= View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+            d.setSystemUiVisibility(f);
+        }
+    }
+
+    @Override
+    public void onPanelVisible(boolean visible) {
+        listVisible = visible;
+        if (topBar != null) applyBars();
+    }
+
     private LinearLayout.LayoutParams tileLp() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(58), 1f);
         lp.setMargins(dp(2.5f), 0, dp(2.5f), 0);
@@ -465,7 +519,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         c.setBackground(Ui.pressable(t, t.dark ? Ui.round(t.key, dp(12)) : Ui.outline(t.key, t.line, dp(1), dp(12)), dp(12)));
         c.addView(Ui.icon(this, icon, t.text, 19));
         TextView l = Ui.text(this, getString(label), 11.5f, t.text, Ui.REGULAR);
-        l.setPadding(0, dp(5), 0, 0);
+        l.setPadding(dp(4), dp(5), dp(4), 0);
+        l.setGravity(Gravity.CENTER);
+        Ui.oneLine(l, TextUtils.TruncateAt.END);
         c.addView(l);
         c.setOnClickListener(v -> {
             if (service == null) return;

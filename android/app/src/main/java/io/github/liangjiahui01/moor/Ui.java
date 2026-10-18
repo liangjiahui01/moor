@@ -147,6 +147,8 @@ final class Ui {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.HORIZONTAL);
         l.setGravity(Gravity.CENTER_VERTICAL);
+        // Baseline alignment shifts children with text inside them and clips their bottom edge
+        l.setBaselineAligned(false);
         return l;
     }
 

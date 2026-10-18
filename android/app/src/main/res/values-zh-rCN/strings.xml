@@ -195,4 +195,6 @@
     <string name="remove_machine_body">Moor 会忘掉它的连接设置。机器上的会话继续运行，它的 authorized_keys 不会改动。</string>
     <string name="remove">移除</string>
     <string name="a11y_switch_machine">切换机器</string>
+    <string name="k_fullscreen">全屏</string>
+    <string name="k_fullscreen_exit">退出全屏</string>
 </resources>

@@ -83,11 +83,13 @@ final class NewSessionSheet {
                 int k = row * 2 + col;
                 View o = option(k, spec[k]);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(64), 1f);
-                lp.setMargins(col == 0 ? 0 : dp(4), row == 0 ? 0 : dp(8), col == 0 ? dp(4) : 0, 0);
+                lp.setMargins(col == 0 ? 0 : dp(4), 0, col == 0 ? dp(4) : 0, 0);
                 r.addView(o, lp);
                 options[k] = o;
             }
-            box.addView(r);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, dp(64));
+            rlp.topMargin = row == 0 ? 0 : dp(8);
+            box.addView(r, rlp);
         }
         custom = field(c, t, "", c.getString(R.string.field_command_hint));
         custom.setTypeface(Ui.mono(c));

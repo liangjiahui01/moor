@@ -211,4 +211,6 @@
     <string name="remove_machine_body">Moor forgets its connection settings. Sessions on the machine keep running, and its authorized_keys is not touched.</string>
     <string name="remove">Remove</string>
     <string name="a11y_switch_machine">Switch machine</string>
+    <string name="k_fullscreen">Fullscreen</string>
+    <string name="k_fullscreen_exit">Exit fullscreen</string>
 </resources>
