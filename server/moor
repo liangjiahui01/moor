@@ -1,0 +1,360 @@
+#!/usr/bin/env python3
+"""Moor server helper. Runs on the machine you SSH into; needs only Python 3.
+
+    moor pair [--host H] [--port 22] [--cmd CMD] [--minutes 10]
+        Print a one-time QR code and link. Scan it in the Moor app to set up the
+        connection and register the phone's SSH key in one step.
+    moor hooks install|uninstall|status
+        Add (or remove) Claude Code hooks that send "needs your input" and
+        "finished" events to the phone.
+    moor notify claude|bell [SESSION]
+        Record an event (called by the hooks above and by Moor's tmux bell hook).
+    moor watch [--since EPOCH_MS]
+        Print events newer than EPOCH_MS, then follow new ones (used by the app).
+    moor claim ID     (internal: run by the one-time pairing key)
+    moor clean        (remove expired one-time pairing keys)
+
+How pairing works: `pair` creates a throwaway SSH key and adds its public half to
+~/.ssh/authorized_keys with expiry-time (sshd refuses it after N minutes),
+restrict (no terminal, no forwarding) and command= (it can only run `moor claim`).
+The QR code carries the host, the host's public key and the throwaway key's seed.
+The phone logs in once with it and hands over its own public key; `claim` adds
+that key and deletes the throwaway one.
+"""
+import argparse
+import base64
+import datetime
+import fcntl
+import getpass
+import json
+import os
+import pathlib
+import re
+import secrets
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+
+HOME = pathlib.Path.home()
+# The two variables below exist for tests that run a throwaway sshd.
+AK = pathlib.Path(os.environ.get("MOOR_AUTHORIZED_KEYS", HOME / ".ssh" / "authorized_keys"))
+HOST_KEY = pathlib.Path(os.environ.get("MOOR_HOST_KEY", "/etc/ssh/ssh_host_ed25519_key.pub"))
+EVENTS = pathlib.Path(os.environ.get("MOOR_EVENTS", HOME / ".local" / "state" / "moor" / "events.log"))
+CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
+MARK = "moor-pair:"
+PUB_RE = re.compile(r"ssh-ed25519 [A-Za-z0-9+/]{68} ?[A-Za-z0-9@._+-]{0,100}")
+EXP_RE = re.compile(r'expiry-time="(\d{12})"')
+
+
+# ---------------------------------------------------------------- pairing
+
+def rewrite_keys(change):
+    """Read-modify-write authorized_keys under a lock, in place (keeps symlinks and mode)."""
+    AK.parent.mkdir(mode=0o700, exist_ok=True)
+    AK.touch(mode=0o600, exist_ok=True)
+    with open(AK, "r+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        lines = f.read().splitlines()
+        new = change(lines)
+        if new != lines:
+            f.seek(0)
+            f.write("".join(line + "\n" for line in new))
+            f.truncate()
+    return new
+
+
+def drop_expired(lines):
+    now = datetime.datetime.now().strftime("%Y%m%d%H%M")
+    out = []
+    for line in lines:
+        m = EXP_RE.search(line)
+        if MARK in line and m and m.group(1) <= now:
+            continue
+        out.append(line)
+    return out
+
+
+def seed_of(private_key_file):
+    """The 32-byte seed inside an unencrypted OpenSSH ed25519 private key."""
+    body = "".join(l for l in private_key_file.read_text().splitlines() if not l.startswith("-----"))
+    blob = base64.b64decode(body)
+    i = blob.index(b"\0") + 1
+
+    def take():
+        nonlocal i
+        n = int.from_bytes(blob[i:i + 4], "big")
+        v = blob[i + 4:i + 4 + n]
+        i += 4 + n
+        return v
+
+    take(), take(), take()          # cipher, kdf, kdf options
+    i += 4                          # number of keys
+    take()                          # public key
+    priv = take()
+    j = 8                           # two check ints
+    for _ in range(2):              # key type, public key
+        n = int.from_bytes(priv[j:j + 4], "big")
+        j += 4 + n
+    return priv[j + 4:j + 4 + 32]
+
+
+def default_host():
+    out = subprocess.run(["hostname", "-I"], capture_output=True, text=True).stdout.split()
+    v4 = [a for a in out if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", a)]
+    return (v4 or out or ["localhost"])[0]
+
+
+def print_qr(text):
+    try:
+        import segno
+    except ImportError:
+        print("(Install segno to show a QR code here: pip3 install --user segno)\n")
+        return
+    rows = [[bool(c) for c in r] for r in segno.make(text, error="m", micro=False).matrix]
+    quiet = 2
+    width = len(rows[0]) + quiet * 2
+    blank = [False] * width
+    rows = [blank] * quiet + [[False] * quiet + r + [False] * quiet for r in rows] + [blank] * quiet
+    if len(rows) % 2:
+        rows.append(blank)
+    # Fixed black on white, so dark terminal themes don't invert the code.
+    for top, bottom in zip(rows[0::2], rows[1::2]):
+        line = []
+        for t, b in zip(top, bottom):
+            fg = "\033[38;2;0;0;0m" if t else "\033[38;2;255;255;255m"
+            bg = "\033[48;2;0;0;0m" if b else "\033[48;2;255;255;255m"
+            line.append(fg + bg + "▀")
+        print("".join(line) + "\033[0m")
+
+
+def pair(args):
+    host_key = HOST_KEY.read_text().split()[1]
+    pid = secrets.token_hex(4)
+    expires = datetime.datetime.now() + datetime.timedelta(minutes=args.minutes)
+    with tempfile.TemporaryDirectory() as d:
+        key = pathlib.Path(d) / "k"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", MARK + pid, "-f", str(key)], check=True)
+        seed = seed_of(key)
+        pub = (pathlib.Path(d) / "k.pub").read_text().split()[1]
+    script = pathlib.Path(__file__).resolve()
+    env = f"MOOR_AUTHORIZED_KEYS={AK} " if "MOOR_AUTHORIZED_KEYS" in os.environ else ""
+    entry = (f'expiry-time="{expires:%Y%m%d%H%M}",restrict,command="{env}{sys.executable} {script} claim {pid}" '
+             f"ssh-ed25519 {pub} {MARK}{pid}")
+    rewrite_keys(lambda lines: drop_expired(lines) + [entry])
+
+    q = {
+        "v": "1", "h": args.host, "p": str(args.port), "u": getpass.getuser(), "c": args.cmd,
+        "hk": host_key, "k": base64.urlsafe_b64encode(seed).decode().rstrip("="),
+        "id": pid, "exp": str(int(expires.timestamp())),
+    }
+    url = "moor://pair?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote)
+    print_qr(url)
+    print("\nIn Moor: Settings → Scan to pair. Or copy the link below and tap \"Paste pairing link\".")
+    print(f"Valid until {expires:%H:%M}, single use.\n")
+    print(url)
+
+
+def claim(pid):
+    if not re.fullmatch(r"[0-9a-f]{8}", pid):
+        sys.exit("bad id")
+    line = sys.stdin.readline(4096).strip()
+    if not PUB_RE.fullmatch(line):
+        sys.exit("bad key")
+    blob = line.split()[1]
+    tag = MARK + pid
+
+    def change(lines):
+        if not any(l.endswith(tag) for l in lines):
+            sys.exit("expired")
+        out = [l for l in lines if not l.endswith(tag)]
+        if not any(blob in l for l in out):
+            out.append(line)
+        return drop_expired(out)
+
+    rewrite_keys(change)
+    print("ok")
+
+
+# ---------------------------------------------------------------- events
+
+def where():
+    """(session, source) of the program that raised the event."""
+    tmux = os.environ.get("TMUX", "")
+    if tmux and os.path.basename(tmux.split(",")[0]) == "moor":
+        r = subprocess.run(["tmux", "display-message", "-p", "#S"], capture_output=True, text=True, timeout=3)
+        return r.stdout.strip(), "moor"
+    tab = os.environ.get("HERDR_TAB_ID")
+    if tab:
+        try:
+            r = subprocess.run(["herdr", "tab", "get", tab], capture_output=True, text=True, timeout=3)
+            label = json.loads(r.stdout)["result"]["tab"].get("label") or ""
+            return label, "herdr"
+        except Exception:
+            return "", "herdr"
+    return "", ""
+
+
+def last_assistant_text(transcript):
+    """First few hundred characters of Claude's last reply, from the session transcript."""
+    try:
+        p = pathlib.Path(transcript)
+        with open(p, "rb") as f:
+            f.seek(max(0, p.stat().st_size - 512 * 1024))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+        for raw in reversed(lines):
+            try:
+                e = json.loads(raw)
+            except ValueError:
+                continue
+            if e.get("type") != "assistant":
+                continue
+            parts = [c.get("text", "") for c in e.get("message", {}).get("content", []) if isinstance(c, dict) and c.get("type") == "text"]
+            text = " ".join(" ".join(parts).split())
+            if text:
+                return text[:300]
+    except Exception:
+        pass
+    return ""
+
+
+def one_line(s, n=300):
+    return " ".join(str(s).replace("\t", " ").split())[:n]
+
+
+def append_event(kind, session, source, cwd, body):
+    EVENTS.parent.mkdir(parents=True, exist_ok=True)
+    for home in (str(HOME), os.path.realpath(HOME)):
+        if cwd == home or cwd.startswith(home + "/"):
+            cwd = "~" + cwd[len(home):]
+            break
+    line = "\t".join([str(int(time.time() * 1000)), kind, one_line(session, 80), source, one_line(cwd, 120), one_line(body)])
+    with open(EVENTS, "a+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(line + "\n")
+        if f.tell() > 256 * 1024:  # keep the log small
+            f.seek(0)
+            keep = f.read().splitlines()[-500:]
+            f.seek(0)
+            f.truncate()
+            f.write("".join(l + "\n" for l in keep))
+
+
+def notify(kind, session_arg):
+    try:
+        data = {}
+        if kind == "claude" and not sys.stdin.isatty():
+            try:
+                data = json.loads(sys.stdin.read() or "{}")
+            except ValueError:
+                data = {}
+        session, source = (session_arg, "moor") if session_arg else where()
+        cwd = data.get("cwd") or os.getcwd()
+        if kind == "claude":
+            ev = data.get("hook_event_name", "")
+            if ev == "Notification":
+                append_event("attention", session, source, cwd, data.get("message", ""))
+            elif ev == "Stop":
+                append_event("done", session, source, cwd, last_assistant_text(data.get("transcript_path", "")))
+        elif kind == "bell":
+            append_event("bell", session, source, cwd, "")
+    except Exception:
+        pass  # never break the caller (a Claude hook or tmux)
+
+
+def watch(since):
+    EVENTS.parent.mkdir(parents=True, exist_ok=True)
+    EVENTS.touch(exist_ok=True)
+    out = sys.stdout
+    f = open(EVENTS, encoding="utf-8")
+    for line in f:
+        try:
+            if int(line.split("\t", 1)[0]) > since:
+                out.write(line)
+        except ValueError:
+            pass
+    out.write("ready\n")
+    out.flush()
+    while True:
+        line = f.readline()
+        if line:
+            out.write(line)
+            out.flush()
+            continue
+        time.sleep(0.5)
+        try:
+            if EVENTS.stat().st_size < f.tell():  # trimmed: start over from the top
+                f.close()
+                f = open(EVENTS, encoding="utf-8")
+        except FileNotFoundError:
+            EVENTS.touch()
+
+
+# ---------------------------------------------------------------- Claude Code hooks
+
+def hooks(action):
+    cmd = f"{pathlib.Path(__file__).resolve()} notify claude"
+    cfg = json.loads(CLAUDE_SETTINGS.read_text()) if CLAUDE_SETTINGS.exists() else {}
+    hk = cfg.get("hooks", {})
+    installed = all(any("notify claude" in h.get("command", "") and "moor" in h.get("command", "")
+                        for g in hk.get(ev, []) for h in g.get("hooks", [])) for ev in ("Notification", "Stop"))
+    if action == "status":
+        print("installed" if installed else "not installed")
+        return
+    for ev in ("Notification", "Stop"):
+        groups = hk.setdefault(ev, [])
+        for g in groups:
+            g["hooks"] = [h for h in g.get("hooks", [])
+                          if not ("notify claude" in h.get("command", "") and "moor" in h.get("command", ""))]
+        groups[:] = [g for g in groups if g.get("hooks")]
+        if action == "install":
+            groups.append({"hooks": [{"type": "command", "command": cmd, "timeout": 10}]})
+        if not groups:
+            del hk[ev]
+    if hk:
+        cfg["hooks"] = hk
+    else:
+        cfg.pop("hooks", None)
+    CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+    if CLAUDE_SETTINGS.exists():
+        backup = CLAUDE_SETTINGS.with_name("settings.json.moor-backup")
+        backup.write_text(CLAUDE_SETTINGS.read_text())
+    tmp = CLAUDE_SETTINGS.with_name("settings.json.moor-tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+    os.replace(tmp, CLAUDE_SETTINGS)
+    print("installed" if action == "install" else "uninstalled")
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] == ["claim"]:
+        claim(a[1] if len(a) > 1 else "")
+    elif a[:1] == ["clean"]:
+        rewrite_keys(drop_expired)
+    elif a[:1] == ["notify"] and len(a) >= 2:
+        notify(a[1], a[2] if len(a) > 2 else "")
+    elif a[:1] == ["watch"]:
+        since = int(a[2]) if len(a) > 2 and a[1] == "--since" else int(time.time() * 1000)
+        try:
+            watch(since)
+        except (BrokenPipeError, KeyboardInterrupt):
+            pass
+    elif a[:1] == ["hooks"] and len(a) == 2 and a[1] in ("install", "uninstall", "status"):
+        hooks(a[1])
+    elif a[:1] == ["pair"]:
+        ap = argparse.ArgumentParser(prog="moor pair", description="Print a one-time pairing QR code for the Moor app")
+        ap.add_argument("--host", default=default_host(), help="address the phone uses to reach this machine (default: first IPv4)")
+        ap.add_argument("--port", type=int, default=22)
+        ap.add_argument("--cmd", default="", help="default command for new sessions on the phone, e.g. claude")
+        ap.add_argument("--minutes", type=int, default=10, help="how long the code stays valid (default 10)")
+        pair(ap.parse_args(a[1:]))
+    else:
+        print(__doc__.strip())
+        sys.exit(0 if a[:1] in (["-h"], ["--help"], []) else 2)
+
+
+if __name__ == "__main__":
+    main()

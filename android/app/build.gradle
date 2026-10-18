@@ -1,0 +1,86 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "io.github.liangjiahui01.moor"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "io.github.liangjiahui01.moor"
+        minSdk 26
+        targetSdk 34
+        versionCode 5
+        versionName "0.5.0"
+
+        // Optional prefill for the settings screen, from defaults.properties (not in git):
+        //   host=my-box.example.com
+        //   user=me
+        def dp = new Properties()
+        def f = rootProject.file("defaults.properties")
+        if (f.exists()) f.withInputStream { dp.load(it) }
+        buildConfigField "String", "DEFAULT_HOST", "\"${dp.getProperty('host', '')}\""
+        buildConfigField "String", "DEFAULT_USER", "\"${dp.getProperty('user', '')}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            def kp = new Properties()
+            def kf = rootProject.file("keystore.properties")
+            if (kf.exists()) {
+                kf.withInputStream { kp.load(it) }
+                storeFile rootProject.file(kp.getProperty("storeFile"))
+                storePassword kp.getProperty("storePassword")
+                keyAlias kp.getProperty("keyAlias")
+                keyPassword kp.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signed with a release keystore when keystore.properties exists, else the debug key
+            signingConfig rootProject.file("keystore.properties").exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        resources {
+            excludes += ["META-INF/versions/*/OSGI-INF/MANIFEST.MF", "META-INF/*.md"]
+        }
+    }
+
+    androidResources {
+        noCompress += "ttf"
+    }
+
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir("generated/moor-assets")
+    }
+}
+
+// Ship the host helper inside the APK; the app installs it on the host when it connects.
+def copyServerHelper = tasks.register("copyServerHelper", Copy) {
+    from(rootProject.file("../server/moor"))
+    into(layout.buildDirectory.dir("generated/moor-assets/server"))
+}
+tasks.named("preBuild") { dependsOn copyServerHelper }
+
+dependencies {
+    implementation "androidx.annotation:annotation:1.9.1"
+    implementation "com.github.mwiede:jsch:0.2.21"
+    implementation "org.bouncycastle:bcprov-jdk18on:1.78.1"
+    // QR scanning without Google Play services
+    implementation "com.journeyapps:zxing-android-embedded:4.3.0"
+    implementation "androidx.core:core:1.13.1"
+}

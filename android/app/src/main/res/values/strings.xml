@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Moor</string>
+
+    <!-- Termux text selection -->
+    <string name="paste_text">Paste</string>
+    <string name="copy_text">Copy</string>
+    <string name="text_selection_more">More</string>
+
+    <!-- common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="copied">Copied</string>
+    <string name="checking">Checking…</string>
+    <string name="not_set">Not set</string>
+    <string name="connect">Connect</string>
+    <string name="got_it">Got it</string>
+
+    <!-- accessibility -->
+    <string name="a11y_back">Back</string>
+    <string name="a11y_sessions">Sessions</string>
+    <string name="a11y_keyboard">Keyboard</string>
+    <string name="a11y_more_keys">More keys</string>
+    <string name="a11y_session_menu">Session menu</string>
+
+    <!-- notification channels -->
+    <string name="channel_connection">Connection</string>
+    <string name="channel_events">Session events</string>
+
+    <!-- connection state -->
+    <string name="state_not_configured">Not set up yet</string>
+    <string name="state_connecting">Connecting…</string>
+    <string name="state_reconnecting">Reconnecting (%1$d)…</string>
+    <string name="state_checking">Checking connection…</string>
+    <string name="state_connected">Connected</string>
+    <string name="state_idle_disconnected">Disconnected while idle, tap to reconnect</string>
+    <string name="state_auth_rejected">Key rejected, open settings to pair again</string>
+    <string name="state_host_key_changed">Host key changed, forget it in settings if this is expected</string>
+    <string name="state_wait_foreground">%1$s, reconnects when you open the app</string>
+    <string name="state_retry_in">%1$s, retrying in %2$ds</string>
+    <string name="conn_connected">Connected · %1$s</string>
+
+    <!-- errors -->
+    <string name="err_network">Network dropped</string>
+    <string name="err_closed">Connection closed</string>
+    <string name="err_timeout">Connection timed out</string>
+    <string name="err_unknown_host">Unknown host</string>
+    <string name="err_refused">Connection refused</string>
+    <string name="err_unreachable">Host unreachable</string>
+    <string name="err_failed">Connection failed</string>
+    <string name="err_not_connected">Not connected</string>
+    <string name="err_no_tmux">tmux is not installed on the host</string>
+    <string name="err_list_failed">Could not list sessions: %1$s</string>
+    <string name="err_create_failed">Could not create session: %1$s</string>
+    <string name="err_rename_failed">Could not rename: %1$s</string>
+    <string name="err_close_failed">Could not close: %1$s</string>
+    <string name="err_name_taken">A session with this name exists</string>
+    <string name="err_need_host_user">Fill in host and user first</string>
+
+    <!-- foreground notification -->
+    <string name="fg_connected">Connected · %1$s</string>
+    <string name="fg_in_session">%1$s · %2$s</string>
+    <string name="fg_idle">Idle</string>
+    <string name="fg_disconnect">Disconnect</string>
+
+    <!-- event notifications -->
+    <string name="notif_attention">%1$s needs you</string>
+    <string name="notif_done">%1$s finished</string>
+    <string name="notif_bell">%1$s rang the bell</string>
+
+    <!-- session list -->
+    <string name="sessions_title">Sessions</string>
+    <string name="group_needs_you">Needs you</string>
+    <string name="group_running">Running</string>
+    <string name="group_idle">Idle</string>
+    <string name="tag_current">Current</string>
+    <string name="status_needs_you">Waiting for your input</string>
+    <string name="status_output">Producing output</string>
+    <string name="list_connecting">Connecting</string>
+    <string name="list_connecting_body">Sessions show up once the host is reachable.</string>
+    <string name="list_loading">Loading sessions…</string>
+    <string name="list_failed">Could not load sessions</string>
+    <string name="list_empty">No sessions yet</string>
+    <string name="list_empty_body">Sessions keep running on the host after you leave the app.</string>
+    <string name="list_no_tmux">tmux not found</string>
+    <string name="list_no_tmux_body">Moor keeps sessions in tmux. Install it on the host, for example: sudo apt install tmux</string>
+    <string name="note_session_ended">%1$s has ended</string>
+    <string name="note_session_ended_plain">The session has ended</string>
+    <string name="note_open_failed">Could not open %1$s</string>
+    <string name="menu_open">Open</string>
+    <string name="menu_rename">Rename</string>
+    <string name="menu_close">Close session</string>
+    <string name="kill_title">Close %1$s?</string>
+    <string name="kill_body">Everything running inside%1$s will be stopped. This cannot be undone.</string>
+    <string name="ago_now">just now</string>
+    <string name="ago_sec">%1$ds ago</string>
+    <string name="ago_min">%1$dm ago</string>
+    <string name="ago_hour">%1$dh ago</string>
+    <string name="ago_day">%1$dd ago</string>
+
+    <!-- new session -->
+    <string name="new_session">New session</string>
+    <string name="new_session_hint">Keeps running after you leave</string>
+    <string name="field_name">Name</string>
+    <string name="field_name_hint">e.g. api-refactor</string>
+    <string name="field_run">Run</string>
+    <string name="field_command_hint">Command, e.g. htop</string>
+    <string name="field_dir">Start in</string>
+    <string name="run_shell">Terminal</string>
+    <string name="run_shell_sub">Login shell</string>
+    <string name="run_claude">Claude Code</string>
+    <string name="run_herdr">herdr</string>
+    <string name="run_herdr_sub">Agent multiplexer</string>
+    <string name="run_custom">Custom</string>
+    <string name="run_custom_sub">Any command</string>
+    <string name="create_open">Create and open</string>
+    <string name="auto_name">session-%1$d</string>
+
+    <!-- terminal keys -->
+    <string name="k_symbols">Symbols</string>
+    <string name="k_ctrl">Ctrl</string>
+    <string name="k_interrupt">Interrupt</string>
+    <string name="k_eof">EOF</string>
+    <string name="k_history">History</string>
+    <string name="k_clear">Clear</string>
+    <string name="k_suspend">Suspend</string>
+    <string name="k_line_start">Line start</string>
+    <string name="k_line_end">Line end</string>
+    <string name="k_kill_line">Kill line</string>
+    <string name="k_kill_word">Kill word</string>
+    <string name="k_details">Details</string>
+    <string name="k_paste">Paste</string>
+    <string name="k_input">Input box</string>
+    <string name="k_reconnect">Reconnect</string>
+    <string name="k_settings">Settings</string>
+    <string name="k_font_size">Font size</string>
+    <string name="input_hint">Type or dictate, then send</string>
+    <string name="input_fill">Fill only</string>
+    <string name="input_send">Send</string>
+
+    <!-- settings -->
+    <string name="welcome_title">Welcome to Moor</string>
+    <string name="welcome_body">Run moor pair on your machine and scan the QR code, or fill in the connection by hand.</string>
+    <string name="sec_connection">CONNECTION</string>
+    <string name="sec_notifications">NOTIFICATIONS</string>
+    <string name="sec_terminal">TERMINAL</string>
+    <string name="sec_keys">KEYS</string>
+    <string name="pair_scan">Scan QR</string>
+    <string name="pair_paste">Paste link</string>
+    <string name="pair_hint">Pairing fills in everything below and adds this phone\'s key to the host.</string>
+    <string name="f_host">Host</string>
+    <string name="f_port">Port</string>
+    <string name="f_user">User</string>
+    <string name="f_default_cmd">Default command</string>
+    <string name="n_attention">Needs input</string>
+    <string name="n_attention_sub">Claude Code is waiting for you</string>
+    <string name="n_done">Task finished</string>
+    <string name="n_done_sub">Claude Code stopped, with its last reply</string>
+    <string name="n_bell">Terminal bell</string>
+    <string name="n_bell_sub">Any program in a session rings the bell</string>
+    <string name="n_hooks">Claude Code hooks</string>
+    <string name="n_hooks_on">Installed</string>
+    <string name="n_hooks_off">Not installed</string>
+    <string name="n_hooks_offline">Connect first</string>
+    <string name="n_hooks_no_python">Needs python3 on host</string>
+    <string name="n_hooks_add_title">Install Claude Code hooks?</string>
+    <string name="n_hooks_add_body">Adds Notification and Stop hooks to ~/.claude/settings.json on the host. Your other hooks are kept and a backup is saved next to the file.</string>
+    <string name="n_hooks_add">Install</string>
+    <string name="n_hooks_remove_title">Remove Claude Code hooks?</string>
+    <string name="n_hooks_remove_body">Removes only the hooks Moor added. You will stop getting Claude Code notifications.</string>
+    <string name="n_hooks_remove">Remove</string>
+    <string name="n_hint">While any notification is on, Moor stays connected in the background.</string>
+    <string name="t_theme">Theme</string>
+    <string name="t_theme_system">System</string>
+    <string name="t_theme_light">Light</string>
+    <string name="t_theme_dark">Dark</string>
+    <string name="t_ime">IME compatibility</string>
+    <string name="t_ime_sub">Turn on if your keyboard drops letters</string>
+    <string name="key_title">This phone\'s public key</string>
+    <string name="key_copy">Copy key</string>
+    <string name="key_copy_cmd">Copy install command</string>
+    <string name="key_failed">Could not create key: %1$s</string>
+    <string name="key_forget_host">Forget saved host key</string>
+    <string name="key_forgot">Host key forgotten, the next connection saves a new one</string>
+    <string name="key_hint">The private key never leaves this phone.</string>
+
+    <!-- pairing -->
+    <string name="pair_scan_prompt">Point at the QR code printed by moor pair</string>
+    <string name="pair_not_link">No pairing link found. Run moor pair on your machine and copy the link it prints.</string>
+    <string name="pair_expired">This pairing code has expired. Run moor pair again.</string>
+    <string name="pair_title">Pair with this machine?</string>
+    <string name="pair_body">%1$s\nDefault command: %2$s\n\nThis adds the phone\'s key to the machine and replaces the current connection settings.</string>
+    <string name="pair_shell_only">shell</string>
+    <string name="pair_confirm">Pair</string>
+    <string name="pair_running">Pairing…</string>
+    <string name="pair_ok">Paired</string>
+    <string name="pair_failed_title">Not paired</string>
+    <string name="pair_err_hostkey">The host key does not match the QR code. Pairing stopped.</string>
+    <string name="pair_err_rejected">The machine did not accept the pairing (%1$s)</string>
+    <string name="pair_err_auth">The pairing code was already used or has expired. Run moor pair again.</string>
+    <string name="pair_err_network">Cannot reach the machine. Check that the phone is on a network that can reach it.</string>
+    <string name="pair_err_generic">Pairing failed: %1$s</string>
+</resources>

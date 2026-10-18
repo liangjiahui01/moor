@@ -1,0 +1,21 @@
+Moor
+Copyright 2026 liangjiahui01
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes or bundles the following third-party work:
+
+- Termux terminal-emulator and terminal-view (https://github.com/termux/termux-app),
+  Apache License 2.0. Copied into android/app/src/main/java/com/termux/ and modified:
+  TerminalSession takes bytes from a pluggable transport instead of a local process,
+  TerminalView reports wheel-up swipes, TerminalRenderer keeps fractional glyph widths,
+  and the color scheme can be switched between light and dark.
+- JSch, mwiede fork (https://github.com/mwiede/jsch), BSD-style license.
+- Bouncy Castle (https://www.bouncycastle.org), MIT-style license.
+- ZXing Android Embedded (https://github.com/journeyapps/zxing-android-embedded) and
+  ZXing (https://github.com/zxing/zxing), Apache License 2.0.
+- AndroidX Core and Annotation, Apache License 2.0.
+- Geist font (https://github.com/vercel/geist-font), SIL Open Font License 1.1.
+  Bundled in android/app/src/main/assets/ui-fonts/ with its license file.
+- Sarasa Gothic / Sarasa Term SC (https://github.com/be5invis/Sarasa-Gothic),
+  SIL Open Font License 1.1. Downloaded at build time by android/scripts/fetch-font.sh.
