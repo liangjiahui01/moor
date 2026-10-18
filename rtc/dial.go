@@ -55,7 +55,7 @@ func dialMain(args []string) {
 		t.SetKeepAlivePeriod(15 * time.Second)
 	}
 	logf("route relay %s", *fallback)
-	join(stdio{}, tcp)
+	logf("closed (%s; a=app b=fallback)", join(stdio{}, tcp))
 }
 
 var errEnded = errors.New("ended")
@@ -167,7 +167,7 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		<-failed
 		ch.Close()
 	}()
-	join(stdio{}, ch)
+	logf("closed (%s; a=app b=channel), ice %s", join(stdio{}, ch), pc.ICEConnectionState())
 	pc.Close()
 	return errEnded
 }

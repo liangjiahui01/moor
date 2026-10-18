@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -61,19 +62,38 @@ func (c *channel) Write(p []byte) (int, error) {
 
 func (c *channel) Close() error { return c.rwc.Close() }
 
-// join copies both ways until either side ends, then closes both.
-func join(a io.ReadWriteCloser, b io.ReadWriteCloser) {
+// join copies both ways until either side ends, then closes both. It reports which direction
+// ended first and why ("a<-b" means reading b or writing a stopped).
+func join(a io.ReadWriteCloser, b io.ReadWriteCloser) string {
 	var once sync.Once
-	closeBoth := func() { a.Close(); b.Close() }
+	var why string
 	done := make(chan struct{}, 2)
-	cp := func(dst io.Writer, src io.Reader) {
+	cp := func(name string, dst io.Writer, src io.Reader) {
 		buf := make([]byte, 64<<10) // a data channel message must fit in one read
-		io.CopyBuffer(dst, src, buf)
-		once.Do(closeBoth)
+		var err error
+		for {
+			n, rerr := src.Read(buf)
+			if n > 0 {
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					err = fmt.Errorf("write: %w", werr)
+					break
+				}
+			}
+			if rerr != nil {
+				err = fmt.Errorf("read: %w", rerr)
+				break
+			}
+		}
+		once.Do(func() {
+			why = name + " " + err.Error()
+			a.Close()
+			b.Close()
+		})
 		done <- struct{}{}
 	}
-	go cp(a, b)
-	go cp(b, a)
+	go cp("a<-b", a, b)
+	go cp("b<-a", b, a)
 	<-done
 	<-done
+	return why
 }

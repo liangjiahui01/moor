@@ -237,4 +237,12 @@
     <string name="setup_partial">未添加：%1$s</string>
     <string name="route_direct">直连</string>
     <string name="route_relay">中转</string>
+    <string name="setup_tab_install">1 · 安装 Moor</string>
+    <string name="setup_tab_setup">2 · 配置</string>
+    <string name="setup_install_body">新设备还没装 Moor？用它的相机扫这个码，从这台手机下载安装包，再点开安装。两台设备要连同一个 WiFi（或者新设备连这台手机的热点）。装好后回到第 2 步。</string>
+    <string name="setup_install_github">这台手机没连 WiFi，二维码会打开 GitHub 下载页。装好后回到第 2 步。</string>
+    <string name="setup_page_lead">从旁边那台手机下载，下载完点开文件安装。</string>
+    <string name="setup_page_download">下载</string>
+    <string name="setup_page_next">装好后打开 Moor，在设置里点扫码，扫原手机第 2 步的二维码。</string>
+    <string name="setup_page_wechat">如果是在微信等 App 里打开的，请换到浏览器打开再下载。</string>
 </resources>

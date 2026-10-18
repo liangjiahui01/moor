@@ -200,9 +200,9 @@ func (h *host) connect(c *wsConn, hello Msg, answers chan Msg) {
 			return
 		}
 		logf("%s: connected, %s", id, describePair(pc))
+		go logRTT(pc, id, opened)
 		go func() {
-			join(ch, tcp)
-			logf("%s: closed", id)
+			logf("%s: closed (%s; a=channel b=sshd)", id, join(ch, tcp))
 			finish()
 		}()
 	})
@@ -246,5 +246,23 @@ func (h *host) connect(c *wsConn, hello Msg, answers chan Msg) {
 	case <-time.After(30 * time.Second):
 		logf("%s: no channel, dropped", id)
 		finish()
+	}
+}
+
+// logRTT notes the path's round trip (from ICE keepalives) every 30 s while the connection lives.
+func logRTT(pc *webrtc.PeerConnection, id string, _ chan struct{}) {
+	for {
+		time.Sleep(30 * time.Second)
+		st := pc.ICEConnectionState()
+		if st == webrtc.ICEConnectionStateClosed || st == webrtc.ICEConnectionStateFailed {
+			return
+		}
+		sctp := pc.SCTP()
+		if sctp == nil {
+			return
+		}
+		if s, ok := sctp.Transport().ICETransport().GetSelectedCandidatePairStats(); ok {
+			logf("%s: rtt %.0f ms", id, s.CurrentRoundTripTime*1000)
+		}
 	}
 }
