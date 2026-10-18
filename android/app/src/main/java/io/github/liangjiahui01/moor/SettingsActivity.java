@@ -113,6 +113,11 @@ public class SettingsActivity extends Activity {
             sub.setPadding(dp(4), 0, dp(4), dp(6));
             page.addView(sub);
         }
+        // ---- updates: first, so it's easy to find ----
+        LinearLayout ab = card();
+        ab.addView(valueRow(R.string.update_check, BuildConfig.VERSION_NAME, true, () -> Updates.checkNow(this)));
+        page.addView(ab);
+
         section(R.string.sec_connection);
         LinearLayout pair = Ui.row(this);
         pair.addView(pairButton(R.drawable.ic_scan, R.string.pair_scan, PairActivity.MODE_SCAN), new LinearLayout.LayoutParams(0, dp(50), 1f));
@@ -258,12 +263,6 @@ public class SettingsActivity extends Activity {
         keys.addView(forget, Ui.lp(-1, dp(52)));
         page.addView(keys);
         page.addView(hint(getString(R.string.key_hint)));
-
-        // ---- about ----
-        section(R.string.sec_about);
-        LinearLayout ab = card();
-        ab.addView(valueRow(R.string.update_check, BuildConfig.VERSION_NAME, true, () -> Updates.checkNow(this)));
-        page.addView(ab);
 
         TextView about = Ui.text(this, "Moor " + BuildConfig.VERSION_NAME + " · github.com/liangjiahui01/moor", 12, t.faint, Ui.REGULAR);
         about.setGravity(Gravity.CENTER);

@@ -441,6 +441,19 @@ public class TermService extends Service {
         term.feed(b, 0, b.length);
     }
 
+    /**
+     * Makes the program on screen draw everything again: shrinks the terminal by a row and puts it back,
+     * and the size changes make it repaint in full. Fixes leftovers when the screen got out of step.
+     */
+    void redraw() {
+        final SshLink l = link;
+        if (l == null || state != State.CONNECTED || term.getRows() < 2) return;
+        l.resize(term.getColumns(), term.getRows() - 1, term.getCellWidth(), term.getCellHeight());
+        main.postDelayed(() -> {
+            if (l == link) l.resize(term.getColumns(), term.getRows(), term.getCellWidth(), term.getCellHeight());
+        }, 150);
+    }
+
     private void attachOnIo(SshLink l, String name, String command, String startup) {
         try {
             l.attach(term, command);

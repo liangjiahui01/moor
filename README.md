@@ -36,7 +36,7 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 
 ## Get started
 
-1. Install the APK from [Releases](https://github.com/liangjiahui01/moor/releases). The app checks there for a new version once a day and offers it; Settings, Check for updates checks right away.
+1. Install the APK from [Releases](https://github.com/liangjiahui01/moor/releases). The app checks there for a new version once a day and offers it; Check for updates at the top of Settings checks right away.
 2. On the host, install the helper:
 
    ```sh

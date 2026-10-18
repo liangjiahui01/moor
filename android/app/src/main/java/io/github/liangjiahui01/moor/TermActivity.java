@@ -557,6 +557,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         actions.setPadding(0, dp(8), 0, 0);
         actions.addView(actionTile(R.drawable.ic_topbar, showTopBar ? R.string.k_hide_bar : R.string.k_show_bar,
             this::toggleTopBar), tileLp());
+        actions.addView(actionTile(R.drawable.ic_redraw, R.string.k_redraw, () -> service.redraw()), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
         p.addView(actions);

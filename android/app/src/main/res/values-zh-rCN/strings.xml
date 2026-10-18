@@ -240,7 +240,6 @@
     <string name="setup_tab_install">1 · 安装 Moor</string>
     <string name="setup_tab_setup">2 · 配置</string>
     <string name="setup_install_body">新设备还没装 Moor？用它的相机扫这个码，从 GitHub 下载安装包，再点开安装。装好后回到第 2 步。</string>
-    <string name="sec_about">关于</string>
     <string name="update_check">检查更新</string>
     <string name="update_checking">正在去 GitHub 查最新版本…</string>
     <string name="update_latest">%1$s 已是最新版本。</string>
@@ -250,4 +249,5 @@
     <string name="update_download">下载</string>
     <string name="update_notes">更新说明</string>
     <string name="update_later">以后再说</string>
+    <string name="k_redraw">刷新画面</string>
 </resources>

@@ -256,7 +256,6 @@
     <string name="setup_tab_install">1 · Install Moor</string>
     <string name="setup_tab_setup">2 · Set up</string>
     <string name="setup_install_body">No Moor on the new device yet? Scan this with its camera to download Moor from GitHub, then install it. Then come back to step 2.</string>
-    <string name="sec_about">ABOUT</string>
     <string name="update_check">Check for updates</string>
     <string name="update_checking">Checking GitHub for a newer version…</string>
     <string name="update_latest">Moor %1$s is the latest version.</string>
@@ -266,4 +265,5 @@
     <string name="update_download">Download</string>
     <string name="update_notes">What\'s new</string>
     <string name="update_later">Later</string>
+    <string name="k_redraw">Redraw</string>
 </resources>
