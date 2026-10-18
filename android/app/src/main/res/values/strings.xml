@@ -255,10 +255,5 @@
     <string name="route_relay">via relay</string>
     <string name="setup_tab_install">1 · Install Moor</string>
     <string name="setup_tab_setup">2 · Set up</string>
-    <string name="setup_install_body">No Moor on the new device yet? Scan this with its camera to download Moor from this phone, then install it. Both need the same Wi-Fi (or connect the new device to this phone\'s hotspot). Then come back to step 2.</string>
-    <string name="setup_install_github">This phone is not on Wi-Fi, so the code opens the download page on GitHub. Install Moor there, then come back to step 2.</string>
-    <string name="setup_page_lead">Download from the phone next to you, then open the file to install.</string>
-    <string name="setup_page_download">Download</string>
-    <string name="setup_page_next">After installing, open Moor and scan the code in step 2 on the other phone (Settings → Scan QR).</string>
-    <string name="setup_page_wechat">Opened inside WeChat or another app? Open this page in the browser to download.</string>
+    <string name="setup_install_body">No Moor on the new device yet? Scan this with its camera to download Moor from GitHub, then install it. Then come back to step 2.</string>
 </resources>

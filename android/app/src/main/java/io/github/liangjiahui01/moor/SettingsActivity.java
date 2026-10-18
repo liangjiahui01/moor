@@ -591,7 +591,6 @@ public class SettingsActivity extends Activity {
         qlp.gravity = Gravity.CENTER_HORIZONTAL;
         box.addView(qr, qlp);
 
-        ApkServer apk = ApkServer.start(this, installPage());
         String until = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(new java.util.Date(inv.expiresAt));
         final boolean[] voice = {Setup.hasVoice(this)};
         LinearLayout voiceCard = null;
@@ -610,8 +609,8 @@ public class SettingsActivity extends Activity {
             styleTab(tabInstall, install);
             styleTab(tabSetup, !install);
             if (install) {
-                body.setText(apk != null ? getString(R.string.setup_install_body) : getString(R.string.setup_install_github));
-                qr.setImageBitmap(qrBitmap(apk != null ? apk.url : RELEASES_URL, side - dp(20)));
+                body.setText(getString(R.string.setup_install_body));
+                qr.setImageBitmap(qrBitmap(APK_URL, side - dp(20)));
             } else {
                 body.setText(getString(R.string.setup_qr_body, until));
                 qr.setImageBitmap(qrBitmap(Setup.bundle(this, inv, voice[0]), side - dp(20)));
@@ -625,11 +624,12 @@ public class SettingsActivity extends Activity {
         if (!inv.skipped.isEmpty()) box.addView(hint(getString(R.string.setup_skipped, TextUtils.join("; ", inv.skipped))));
         Dialog d = Ui.bottomSheet(this, t, box);
         d.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        d.setOnDismissListener(x -> { if (apk != null) apk.stop(); });
         d.show();
     }
 
-    private static final String RELEASES_URL = "https://github.com/liangjiahui01/moor/releases/latest";
+    /** This version's APK on GitHub: the install code downloads it straight away. */
+    private static final String APK_URL = "https://github.com/liangjiahui01/moor/releases/download/v"
+        + BuildConfig.VERSION_NAME + "/moor-" + BuildConfig.VERSION_NAME + ".apk";
 
     private TextView tab(String label) {
         TextView v = Ui.text(this, label, 13.5f, t.text, Ui.MEDIUM);
@@ -642,20 +642,6 @@ public class SettingsActivity extends Activity {
         v.setTextColor(on ? t.bg : t.text);
     }
 
-    /** The page a new device opens from the install QR code; {apk} and {size} are filled in by ApkServer. */
-    private String installPage() {
-        String esc = android.text.TextUtils.htmlEncode("Moor " + BuildConfig.VERSION_NAME);
-        return "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            + "<title>Moor</title><style>body{margin:0;background:#1e1e2e;color:#cdd6f4;font:16px/1.6 system-ui,sans-serif}"
-            + "main{max-width:420px;margin:0 auto;padding:48px 24px}h1{font-size:26px;margin:0 0 8px}"
-            + "a.b{display:block;margin:28px 0 20px;padding:16px;border-radius:14px;background:#cba6f7;color:#1e1e2e;"
-            + "text-align:center;font-weight:600;text-decoration:none}p{color:#a6adc8;margin:10px 0}</style></head><body><main>"
-            + "<h1>" + esc + "</h1><p>" + android.text.TextUtils.htmlEncode(getString(R.string.setup_page_lead)) + "</p>"
-            + "<a class=b href='{apk}'>" + android.text.TextUtils.htmlEncode(getString(R.string.setup_page_download)) + " ({size})</a>"
-            + "<p>" + android.text.TextUtils.htmlEncode(getString(R.string.setup_page_next)) + "</p>"
-            + "<p>" + android.text.TextUtils.htmlEncode(getString(R.string.setup_page_wechat)) + "</p>"
-            + "</main></body></html>";
-    }
 
     private static android.graphics.Bitmap qrBitmap(String text, int px) {
         try {
