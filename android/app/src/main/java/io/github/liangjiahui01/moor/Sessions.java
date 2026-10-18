@@ -25,6 +25,13 @@ final class Sessions {
         return "command -v python3 >/dev/null 2>&1 && echo python-ok; true";
     }
 
+    /** Like setupCommand, and also prints helper-ok when the installed helper's SHA-256 is sha (no upload needed). */
+    static String setupCommand(String sha) {
+        return "command -v python3 >/dev/null 2>&1 || exit 0; echo python-ok; python3 -c 'import hashlib,sys\n"
+            + "try: print(\"helper-ok\" if hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest()==sys.argv[2] else \"\")\n"
+            + "except OSError: pass' \"" + HELPER + "\" " + sha + "; true";
+    }
+
     /** Installs the server helper from stdin. */
     static String installHelperCommand() {
         return "mkdir -p \"$HOME/.local/share/moor/bin\" && cat > \"" + HELPER + ".new\" && chmod 755 \"" + HELPER

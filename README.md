@@ -58,19 +58,13 @@ Prefer to do it by hand? Fill in host, port and user in Settings, then copy the 
 
 ## Away from the host's network
 
-When the host sits behind NAT (an office or cloud network) and the phone is elsewhere, Moor can connect the two directly over WebRTC. A small relay you run on any public server introduces them; SSH then flows peer to peer, and only touches the relay's address when no direct path exists.
+When the host sits behind NAT (an office or cloud network) and the phone is elsewhere, Moor can connect the two directly over WebRTC. A small relay you run on a public server lets them swap addresses for each connection; after that SSH flows peer to peer, and the relay never sees it.
 
-1. On a public server (open TCP 80), get `moor-rtc` from [Releases](https://github.com/liangjiahui01/moor/releases) and run `moor-rtc relay --listen :80` (as a service).
-2. On the host, get `moor-rtc` too and run:
+1. On the public server, run `moor-rtc relay --listen :80`.
+2. On the host, run `moor-rtc init --signal ws://RELAY_ADDRESS/ws`, then keep `moor-rtc host` running.
+3. Pair again with `moor pair`.
 
-   ```sh
-   moor-rtc init --signal ws://RELAY_ADDRESS/ws   # writes ~/.config/moor/rtc.json (room and key)
-   moor-rtc host                                  # keep it running, e.g. as a systemd user service
-   ```
-
-3. Pair again with `moor pair`: the link now carries the relay, room and key.
-
-The status shows "Connected · direct" for a peer-to-peer connection, or "via relay" when it fell back to the machine's address. When the host's SSH port can't be reached from outside either, point that address at a reverse tunnel on the relay server (`ssh -R`), and pair with `moor pair --host RELAY_ADDRESS --port PORT --sshd-port 22`.
+The full guide (systemd units, a fallback tunnel for when no direct path exists, security, and how to tell which path is in use) is in [docs/remote-access.md](docs/remote-access.md).
 
 ## Notifications
 

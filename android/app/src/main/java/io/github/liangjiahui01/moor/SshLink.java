@@ -81,6 +81,12 @@ final class SshLink implements TerminalSession.Transport {
         return p == null ? "" : p.route;
     }
 
+    /** True when a direct connection's path is known to be dead (no need to probe). */
+    boolean pathDown() {
+        Rtc.Proxy p = proxy;
+        return p != null && p.pathDown;
+    }
+
     /**
      * Blocking: opens a pty channel running command (e.g. attach to a session), replacing the current terminal
      * channel. The main thread must have cleared the screen and loaded history before; from here remote output

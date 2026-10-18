@@ -129,7 +129,11 @@ func newAPI() *webrtc.API {
 	se.DetachDataChannels()
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	// Notice a dead path within seconds, so SSH reconnects instead of hanging
-	se.SetICETimeouts(5*time.Second, 12*time.Second, 2*time.Second)
+	se.SetICETimeouts(4*time.Second, 8*time.Second, 2*time.Second)
+	// Take the first path that works: by default the machine waits 0.5 s (srflx) or 1 s (prflx)
+	// for a better pair before choosing, and the first to answer is usually the fastest anyway
+	se.SetSrflxAcceptanceMinWait(0)
+	se.SetPrflxAcceptanceMinWait(0)
 	return webrtc.NewAPI(webrtc.WithSettingEngine(se))
 }
 

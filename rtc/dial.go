@@ -76,6 +76,7 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
+	logf("relay connected")
 	c := &wsConn{Conn: ws}
 	defer c.Close()
 	hello := Msg{T: "hello", ID: randID(9), TS: time.Now().Unix()}
@@ -96,6 +97,7 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 	if o.T == "error" {
 		return errors.New(o.E)
 	}
+	logf("offer received")
 	if o.T != "offer" || !validMAC(o.MAC, sdpMAC(key, o)) {
 		return errors.New("offer has a bad signature")
 	}
@@ -162,10 +164,12 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		return err
 	}
 	logf("route direct %s", describePair(pc))
-	// A dead path closes the channel, which ends the copy and so the SSH connection
+	// A dead path ends the process right away: closing the channel can hang on a dead path, and
+	// the app reconnects as soon as SSH sees our stdout close
 	go func() {
 		<-failed
-		ch.Close()
+		logf("closed (path failed)")
+		os.Exit(3)
 	}()
 	logf("closed (%s; a=app b=channel), ice %s", join(stdio{}, ch), pc.ICEConnectionState())
 	pc.Close()

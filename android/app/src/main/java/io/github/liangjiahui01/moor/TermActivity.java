@@ -434,12 +434,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         input.setTypeface(Ui.mono(this));
         input.setPadding(dp(16), dp(10), dp(16), dp(10));
         input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
-        // One line that wraps (up to four), with Send on the keyboard's Enter key
+        // A single line that scrolls sideways as text grows (dictation included), so the bar never
+        // changes height; Send on the keyboard's Enter key
         input.setInputType(InputType.TYPE_CLASS_TEXT);
         input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND
             | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
-        input.setHorizontallyScrolling(false);
-        input.setMaxLines(4);
+        input.setHorizontallyScrolling(true);
+        input.setMaxLines(1);
+        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         input.setMinHeight(dp(44));
         input.setOnFocusChangeListener((v, has) -> {
             if (!has) inputBlurAt = android.os.SystemClock.uptimeMillis();

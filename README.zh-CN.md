@@ -58,19 +58,13 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 
 ## 不在主机所在网络时
 
-主机在 NAT 后面（公司或云上的内网）、手机在别处时，Moor 可以用 WebRTC 让两边直接连通。你在任意一台公网服务器上跑一个小中继，它只负责介绍双方；之后 SSH 点对点传输，只有找不到直连路径时才走机器地址。
+主机在 NAT 后面（公司或云上的内网）、手机在别处时，Moor 可以用 WebRTC 让两边直接连通。你在一台公网服务器上跑一个小中继，它只在每次连接时帮两边交换地址；连上后 SSH 在手机和主机之间点对点传输，中继看不到内容。
 
-1. 在公网服务器上（放行 TCP 80）从 [Releases](https://github.com/liangjiahui01/moor/releases) 下载 `moor-rtc`，以服务方式运行 `moor-rtc relay --listen :80`。
-2. 在主机上也下载 `moor-rtc`，运行：
+1. 公网服务器上运行 `moor-rtc relay --listen :80`。
+2. 主机上运行 `moor-rtc init --signal ws://中继地址/ws`，再常驻运行 `moor-rtc host`。
+3. 重新 `moor pair` 配对。
 
-   ```sh
-   moor-rtc init --signal ws://中继地址/ws   # 生成 ~/.config/moor/rtc.json（房间号和密钥）
-   moor-rtc host                             # 常驻运行，比如做成 systemd 用户服务
-   ```
-
-3. 重新 `moor pair` 配对：配对链接会带上中继地址、房间号和密钥。
-
-点对点连上时状态显示「已连接 · 直连」，退回机器地址时显示「中转」。如果主机的 SSH 端口在外网也连不到，可以在中继服务器上做一条反向隧道（`ssh -R`）当这个地址，用 `moor pair --host 中继地址 --port 端口 --sshd-port 22` 配对。
+完整步骤（systemd 服务写法、打不通直连时的备用隧道、安全说明、怎么看走的哪条路）见 [docs/remote-access.zh-CN.md](docs/remote-access.zh-CN.md)。
 
 ## 通知
 

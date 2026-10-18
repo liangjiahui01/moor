@@ -190,17 +190,23 @@ public class TermService extends Service {
             main.removeCallbacks(reconnect);
             attempt = 0;
             connect();
+        } else if (state == State.CONNECTED && link != null && link.pathDown()) {
+            // The direct path died while we were away: reconnect now instead of probing
+            Log.i(TAG, "path down after resume");
+            final SshLink l = link;
+            io.execute(l::close);
         } else if (state == State.CONNECTED && away > 15_000) {
             final SshLink l = link;
             if (screen != null) screen.onProbe(true);
-            io.execute(() -> {
+            // Own thread: a probe hanging on a dead link must not hold up the reconnect behind it
+            new Thread(() -> {
                 boolean ok = l.probe();
                 if (!ok) {
                     Log.i(TAG, "probe failed after resume");
                     l.close();
                 }
                 main.post(() -> { if (ok && screen != null) screen.onProbe(false); });
-            });
+            }, "Probe").start();
         }
     }
 
@@ -226,9 +232,11 @@ public class TermService extends Service {
                 SshLink l = SshLink.open(this, prefs, prv, pub, known, this::onChannelClosed);
                 boolean python = false;
                 try {
-                    String out = l.exec(Sessions.setupCommand(), null, 8_000);
+                    // One round trip in the usual case: the helper is only sent when it changed
+                    byte[] helper = helperBytes();
+                    String out = l.exec(Sessions.setupCommand(sha256(helper)), null, 8_000);
                     python = out.contains("python-ok");
-                    if (python) l.exec(Sessions.installHelperCommand(), helperBytes(), 8_000);
+                    if (python && !out.contains("helper-ok")) l.exec(Sessions.installHelperCommand(), helper, 8_000);
                 } catch (Exception e) {
                     Log.w(TAG, "session setup failed", e);
                 }
@@ -238,6 +246,12 @@ public class TermService extends Service {
                 main.post(() -> onConnectFailed(e));
             }
         });
+    }
+
+    private static String sha256(byte[] data) throws java.security.NoSuchAlgorithmException {
+        StringBuilder h = new StringBuilder();
+        for (byte x : java.security.MessageDigest.getInstance("SHA-256").digest(data)) h.append(String.format("%02x", x));
+        return h.toString();
     }
 
     private byte[] helperBytes() throws java.io.IOException {
@@ -362,7 +376,8 @@ public class TermService extends Service {
             setState(State.WAITING, getString(R.string.state_wait_foreground, reason));
             return;
         }
-        long delay = Math.min(500L << Math.min(attempt, 5), 10_000L);
+        // First retry at once (a dropped path is usually back right away), then back off
+        long delay = attempt == 0 ? 100L : Math.min(500L << Math.min(attempt - 1, 5), 10_000L);
         attempt++;
         String sec = delay % 1000 == 0 ? String.valueOf(delay / 1000) : String.valueOf(delay / 1000.0);
         setState(State.WAITING, getString(R.string.state_retry_in, reason, sec));

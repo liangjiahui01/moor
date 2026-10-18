@@ -215,7 +215,9 @@ func (h *host) connect(c *wsConn, hello Msg, answers chan Msg) {
 		finish()
 		return
 	}
+	t0 := time.Now()
 	gather(pc, 3*time.Second)
+	logf("%s: offer ready in %d ms", id, time.Since(t0).Milliseconds())
 	o := Msg{T: "offer", ID: id, SDP: pc.LocalDescription().SDP}
 	o.MAC = sdpMAC(h.key, o)
 	if err := c.send(o); err != nil {

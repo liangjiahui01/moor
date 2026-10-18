@@ -37,6 +37,8 @@ final class Rtc {
         private Process proc;
         /** "direct", "relay" (fell back to host:port) or "" while connecting. */
         volatile String route = "";
+        /** The direct path stopped answering (ICE disconnected or failed) and hasn't come back. */
+        volatile boolean pathDown;
 
         Proxy(Context c, String signal, String room, String key) {
             this.bin = binary(c);
@@ -61,6 +63,8 @@ final class Rtc {
                         Log.i(TAG, line);
                         if (line.contains("route direct")) route = "direct";
                         else if (line.contains("route relay")) route = "relay";
+                        else if (line.endsWith("ice disconnected") || line.endsWith("ice failed")) pathDown = true;
+                        else if (line.endsWith("ice connected")) pathDown = false;
                     }
                 } catch (Exception ignored) {
                 }
