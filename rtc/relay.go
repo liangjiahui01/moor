@@ -18,6 +18,7 @@ var roomRE = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 type room struct {
 	host    *wsConn
 	clients map[string]*wsConn // by offer id
+	pre     *Msg               // the machine's ready offer, for the next phone
 }
 
 type relay struct {
@@ -129,6 +130,7 @@ func (r *relay) serveHost(id string, c *wsConn) {
 		r.mu.Lock()
 		if rm.host == c {
 			rm.host = nil
+			rm.pre = nil
 		}
 		r.dropIfEmpty(id)
 		r.mu.Unlock()
@@ -140,6 +142,15 @@ func (r *relay) serveHost(id string, c *wsConn) {
 			return
 		}
 		c.SetReadDeadline(time.Now().Add(70 * time.Second))
+		if m.T == "preoffer" {
+			m.T = "offer" // as the phone will see it (the signature covers "offer")
+			r.mu.Lock()
+			if rm.host == c {
+				rm.pre = &m
+			}
+			r.mu.Unlock()
+			continue
+		}
 		r.mu.Lock()
 		to := rm.clients[m.ID]
 		r.mu.Unlock()
@@ -169,7 +180,7 @@ func (r *relay) serveClient(id string, c *wsConn) {
 			return
 		}
 		c.SetReadDeadline(time.Now().Add(70 * time.Second))
-		if (m.T != "hello" && m.T != "answer") || m.ID == "" {
+		if (m.T != "hello" && m.T != "answer" && m.T != "cand") || m.ID == "" {
 			continue
 		}
 		r.mu.Lock()
@@ -177,6 +188,17 @@ func (r *relay) serveClient(id string, c *wsConn) {
 		if m.T == "hello" {
 			if len(mine) >= 32 {
 				r.mu.Unlock()
+				continue
+			}
+			if pre := rm.pre; m.Pre && pre != nil && rm.host != nil {
+				// Hand over the machine's ready offer and let it know, so it makes the next one
+				rm.pre = nil
+				rm.clients[pre.ID] = c
+				mine = append(mine, pre.ID)
+				host := rm.host
+				r.mu.Unlock()
+				c.send(*pre)
+				host.send(Msg{T: "taken", ID: pre.ID})
 				continue
 			}
 			rm.clients[m.ID] = c

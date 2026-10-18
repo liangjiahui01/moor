@@ -25,7 +25,10 @@ import (
 //
 //	phone   → machine  hello   (signed with id and time)
 //	machine → phone    offer   (the machine starts ICE: in tests, paths only opened this way round)
-//	phone   → machine  answer
+//	phone   → machine  answer, then cand for each candidate as it's found
+//
+// To save the trip to the machine, the machine also leaves a ready offer on the relay (preoffer),
+// which the relay hands to the next phone at once, telling the machine it was taken.
 type Msg struct {
 	T   string `json:"t"`             // hello, offer, answer, error
 	ID  string `json:"id,omitempty"`  // one per connection attempt
@@ -33,6 +36,8 @@ type Msg struct {
 	TS  int64  `json:"ts,omitempty"`  // unix seconds, hello only
 	MAC string `json:"mac,omitempty"` // HMAC-SHA256 with the shared key
 	E   string `json:"e,omitempty"`   // error text
+	// Pre, on a hello: the phone takes a ready offer the relay holds for the machine (any id)
+	Pre bool `json:"pre,omitempty"`
 }
 
 func mac(key []byte, parts ...string) string {

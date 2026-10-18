@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -79,7 +80,7 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 	logf("relay connected")
 	c := &wsConn{Conn: ws}
 	defer c.Close()
-	hello := Msg{T: "hello", ID: randID(9), TS: time.Now().Unix()}
+	hello := Msg{T: "hello", ID: randID(9), TS: time.Now().Unix(), Pre: true}
 	hello.MAC = helloMAC(key, hello)
 	if err := c.send(hello); err != nil {
 		return err
@@ -90,7 +91,8 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		if err := c.ReadJSON(&o); err != nil {
 			return errors.New("no answer from the machine")
 		}
-		if o.ID == hello.ID {
+		// Our own id, or a ready offer the relay handed over (it has the machine's id)
+		if o.ID == hello.ID || o.T == "offer" {
 			break
 		}
 	}
@@ -118,10 +120,30 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 			}
 		}
 	})
+	// Candidates go to the machine as they're found, after the answer (trickle): the answer leaves at
+	// once, so the machine can already reply to our checks while we're still asking STUN servers
+	var cmu sync.Mutex
+	answered := false
+	var queued []string
+	sendCand := func(cand string) {
+		m := Msg{T: "cand", ID: o.ID, SDP: cand}
+		m.MAC = sdpMAC(key, m)
+		c.send(m)
+	}
 	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
-		if cand != nil {
-			logf("local %s %s %s:%d", cand.Typ, cand.Protocol, cand.Address, cand.Port)
+		if cand == nil {
+			return
 		}
+		logf("local %s %s %s:%d", cand.Typ, cand.Protocol, cand.Address, cand.Port)
+		line := cand.ToJSON().Candidate
+		cmu.Lock()
+		if !answered {
+			queued = append(queued, line)
+			cmu.Unlock()
+			return
+		}
+		cmu.Unlock()
+		sendCand(line)
 	})
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		dc.OnOpen(func() { opened <- dc })
@@ -138,12 +160,19 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		pc.Close()
 		return err
 	}
-	gather(pc, 2500*time.Millisecond)
-	a := Msg{T: "answer", ID: hello.ID, SDP: pc.LocalDescription().SDP}
+	a := Msg{T: "answer", ID: o.ID, SDP: pc.LocalDescription().SDP}
 	a.MAC = sdpMAC(key, a)
 	if err := c.send(a); err != nil {
 		pc.Close()
 		return err
+	}
+	cmu.Lock()
+	answered = true
+	early := queued
+	queued = nil
+	cmu.Unlock()
+	for _, line := range early {
+		sendCand(line)
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()

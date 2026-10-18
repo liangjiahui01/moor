@@ -21,6 +21,8 @@ phone ──answer─▶ relay ──▶ host      (with the phone's candidate a
 phone ◀════ direct path (WebRTC data channel carrying SSH) ════▶ host
 ```
 
+To save a trip, the host leaves a ready offer on the relay, which hands it to the next phone at once and tells the host to make another; the phone sends its answer right away and its candidate addresses as it finds them.
+
 Each side asks public STUN servers for its address on the internet, puts it in the offer or answer, and both send packets to each other at once, which opens a path through each NAT (UDP hole punching). From then on the relay is out of the loop: terminal traffic flows only between phone and host.
 
 ## Security

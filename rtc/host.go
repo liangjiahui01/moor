@@ -101,6 +101,97 @@ func (h *host) session() error {
 	})
 	var mu sync.Mutex
 	waiting := map[string]chan Msg{} // answers by id
+	unwait := func(id string) {
+		mu.Lock()
+		delete(waiting, id)
+		mu.Unlock()
+	}
+	// A ready offer waits on the relay, so a phone gets one at once instead of asking us over a slow
+	// path; it's replaced now and then, and a new one is made as soon as one is taken
+	pres := map[string]*pending{} // offers on the relay, not yet taken
+	var cur string
+	closed := make(chan struct{})
+	defer func() {
+		close(closed)
+		mu.Lock()
+		for _, p := range pres {
+			p.finish()
+		}
+		pres = map[string]*pending{}
+		mu.Unlock()
+	}()
+	makePre := func() {
+		id := randID(9)
+		ch := make(chan Msg, 16)
+		mu.Lock()
+		waiting[id] = ch
+		mu.Unlock()
+		p, err := h.prepare(id, ch)
+		if err != nil {
+			logf("ready offer: %v", err)
+			unwait(id)
+			return
+		}
+		mu.Lock()
+		select {
+		case <-closed:
+			mu.Unlock()
+			p.finish()
+			return
+		default:
+		}
+		pres[id] = p
+		old := cur
+		cur = id
+		mu.Unlock()
+		pre := p.offer
+		pre.T = "preoffer"
+		if c.send(pre) != nil {
+			return
+		}
+		// The one it replaces may already be on its way to a phone: keep it a little longer
+		if old != "" {
+			time.AfterFunc(20*time.Second, func() {
+				mu.Lock()
+				q := pres[old]
+				delete(pres, old)
+				mu.Unlock()
+				if q != nil {
+					q.finish()
+					unwait(old)
+				}
+			})
+		}
+	}
+	take := func(id string) bool {
+		mu.Lock()
+		p := pres[id]
+		delete(pres, id)
+		mu.Unlock()
+		if p == nil {
+			return false
+		}
+		logf("%s: ready offer taken", id)
+		go func() {
+			h.complete(p, 15*time.Second)
+			unwait(id)
+		}()
+		go makePre()
+		return true
+	}
+	go func() {
+		makePre()
+		t := time.NewTicker(45 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-closed:
+				return
+			case <-t.C:
+				makePre()
+			}
+		}
+	}()
 	for {
 		var m Msg
 		if err := c.ReadJSON(&m); err != nil {
@@ -112,17 +203,29 @@ func (h *host) session() error {
 			if !h.accept(m) {
 				continue
 			}
-			ch := make(chan Msg, 1)
+			ch := make(chan Msg, 16)
 			mu.Lock()
 			waiting[m.ID] = ch
 			mu.Unlock()
 			go func(m Msg) {
-				h.connect(c, m, ch)
-				mu.Lock()
-				delete(waiting, m.ID)
-				mu.Unlock()
+				defer unwait(m.ID)
+				p, err := h.prepare(m.ID, ch)
+				if err != nil {
+					logf("%s: %v", m.ID, err)
+					return
+				}
+				if c.send(p.offer) != nil {
+					p.finish()
+					return
+				}
+				h.complete(p, 15*time.Second)
 			}(m)
-		case "answer":
+		case "taken":
+			take(m.ID)
+		case "answer", "cand":
+			if m.T == "answer" {
+				take(m.ID) // a relay that doesn't say "taken"
+			}
 			mu.Lock()
 			ch := waiting[m.ID]
 			mu.Unlock()
@@ -160,13 +263,21 @@ func (h *host) accept(m Msg) bool {
 	return true
 }
 
-// connect offers a data channel to the phone and, once it opens, joins it to sshd.
-func (h *host) connect(c *wsConn, hello Msg, answers chan Msg) {
-	id := hello.ID
+// pending is a connection offered to a phone: the offer is made, the answer not yet in.
+type pending struct {
+	id      string
+	pc      *webrtc.PeerConnection
+	offer   Msg
+	answers chan Msg
+	opened  chan struct{}
+	finish  func()
+}
+
+// prepare makes a data channel and its signed offer; once the channel opens it is joined to sshd.
+func (h *host) prepare(id string, answers chan Msg) (*pending, error) {
 	pc, err := h.api.NewPeerConnection(iceConfig(h.stun))
 	if err != nil {
-		logf("%s: %v", id, err)
-		return
+		return nil, err
 	}
 	h.mu.Lock()
 	h.active++
@@ -189,7 +300,7 @@ func (h *host) connect(c *wsConn, hello Msg, answers chan Msg) {
 	dc, err := pc.CreateDataChannel("ssh", nil)
 	if err != nil {
 		finish()
-		return
+		return nil, err
 	}
 	opened := make(chan struct{})
 	dc.OnOpen(func() {
@@ -218,43 +329,70 @@ func (h *host) connect(c *wsConn, hello Msg, answers chan Msg) {
 		err = pc.SetLocalDescription(offer)
 	}
 	if err != nil {
-		logf("%s: %v", id, err)
 		finish()
-		return
+		return nil, err
 	}
-	t0 := time.Now()
 	gather(pc, 3*time.Second)
-	logf("%s: offer ready in %d ms", id, time.Since(t0).Milliseconds())
 	o := Msg{T: "offer", ID: id, SDP: pc.LocalDescription().SDP}
 	o.MAC = sdpMAC(h.key, o)
-	if err := c.send(o); err != nil {
-		finish()
-		return
-	}
+	return &pending{id: id, pc: pc, offer: o, answers: answers, opened: opened, finish: finish}, nil
+}
+
+// complete waits for the phone's signed answer and then for the channel to open.
+func (h *host) complete(p *pending, wait time.Duration) {
 	var a Msg
-	select {
-	case a = <-answers:
-	case <-time.After(15 * time.Second):
-		logf("%s: no answer, dropped", id)
-		finish()
-		return
+	var early []Msg // candidates that came before the answer
+	deadline := time.After(wait)
+wait:
+	for {
+		select {
+		case m := <-p.answers:
+			if m.T == "answer" {
+				a = m
+				break wait
+			}
+			early = append(early, m)
+		case <-deadline:
+			logf("%s: no answer, dropped", p.id)
+			p.finish()
+			return
+		}
 	}
 	if !validMAC(a.MAC, sdpMAC(h.key, a)) {
-		logf("%s: answer has a bad signature", id)
-		finish()
+		logf("%s: answer has a bad signature", p.id)
+		p.finish()
 		return
 	}
-	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: a.SDP}); err != nil {
-		logf("%s: %v", id, err)
-		finish()
+	if err := p.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: a.SDP}); err != nil {
+		logf("%s: %v", p.id, err)
+		p.finish()
 		return
+	}
+	// The phone's candidates trickle in after its answer
+	addCand := func(m Msg) {
+		if m.T != "cand" || !validMAC(m.MAC, sdpMAC(h.key, m)) {
+			return
+		}
+		if err := p.pc.AddICECandidate(webrtc.ICECandidateInit{Candidate: m.SDP}); err != nil {
+			logf("%s: candidate: %v", p.id, err)
+		}
+	}
+	for _, m := range early {
+		addCand(m)
 	}
 	// The phone gives up after its own timeout; don't keep a half-open connection
-	select {
-	case <-opened:
-	case <-time.After(30 * time.Second):
-		logf("%s: no channel, dropped", id)
-		finish()
+	giveUp := time.After(30 * time.Second)
+	for {
+		select {
+		case <-p.opened:
+			return
+		case m := <-p.answers:
+			addCand(m)
+		case <-giveUp:
+			logf("%s: no channel, dropped", p.id)
+			p.finish()
+			return
+		}
 	}
 }
 
