@@ -366,6 +366,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         for (String[] k : STRIP) strip.addView(pillKey(k[0], k[1]), pillLp(-2));
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
         keyArea.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+        // The key row folds away (the default): typing and dictation need only the input bar
+        keyStrip = scroller;
+        keyStrip.setVisibility(Prefs.raw(this).getBoolean("key_strip", false) ? View.VISIBLE : View.GONE);
 
         keyArea.addView(buildInputBar(typed));
         refreshToggles();
@@ -423,10 +426,32 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     }
 
     /** The input box with image, voice and send buttons beside it. */
+    private View keyStrip, stripToggle;
+
+    /** Shows or folds away the row of keys above the input bar; remembered. */
+    private void toggleKeyStrip() {
+        boolean show = keyStrip.getVisibility() != View.VISIBLE;
+        Prefs.put(this, "key_strip", show);
+        keyStrip.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) setMore(false);
+        styleStripToggle();
+    }
+
+    private void styleStripToggle() {
+        if (stripToggle == null || keyStrip == null) return;
+        // Chevron up: there are keys to unfold; down: fold them away
+        ((FrameLayout) stripToggle).getChildAt(0).setRotation(keyStrip.getVisibility() == View.VISIBLE ? 0 : 180);
+    }
+
     private View buildInputBar(String typed) {
         LinearLayout bar = Ui.row(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(8), dp(4), dp(8), dp(8));
+        bar.setPadding(dp(8), dp(6), dp(8), dp(8));
+        stripToggle = roundButton(R.drawable.ic_chevron_down, R.string.a11y_key_strip, false, v -> toggleKeyStrip());
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(36), dp(44));
+        tlp.rightMargin = dp(6);
+        bar.addView(stripToggle, tlp);
+        bar.post(this::styleStripToggle);
         input = new EditText(this);
         input.setText(typed);
         input.setSelection(typed.length());

@@ -252,4 +252,5 @@
     <string name="k_redraw">刷新画面</string>
     <string name="t_screen_on">会话中保持亮屏</string>
     <string name="t_screen_on_sub">在 Moor 里打开会话时屏幕不自动熄灭</string>
+    <string name="a11y_key_strip">显示或收起功能键</string>
 </resources>
