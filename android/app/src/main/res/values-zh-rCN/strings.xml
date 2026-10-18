@@ -30,7 +30,7 @@
     <string name="state_auth_rejected">密钥被拒绝，去设置里重新配对</string>
     <string name="state_host_key_changed">主机指纹变了；确认无误可在设置里忘记旧指纹</string>
     <string name="state_wait_foreground">%1$s，打开应用时重连</string>
-    <string name="state_retry_in">%1$s，%2$d 秒后重试</string>
+    <string name="state_retry_in">%1$s，%2$s 秒后重试</string>
 
     <string name="err_network">网络断开</string>
     <string name="err_closed">连接已关闭</string>

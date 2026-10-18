@@ -37,7 +37,7 @@
     <string name="state_auth_rejected">Key rejected, open settings to pair again</string>
     <string name="state_host_key_changed">Host key changed, forget it in settings if this is expected</string>
     <string name="state_wait_foreground">%1$s, reconnects when you open the app</string>
-    <string name="state_retry_in">%1$s, retrying in %2$ds</string>
+    <string name="state_retry_in">%1$s, retrying in %2$ss</string>
 
     <!-- errors -->
     <string name="err_network">Network dropped</string>
