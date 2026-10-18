@@ -6,6 +6,13 @@ Moor connects to a machine you can SSH into, keeps every session in tmux there, 
 
 [中文说明](README.zh-CN.md)
 
+<p align="center">
+  <img src="docs/screenshots/list-light.png" width="200" alt="Session list">
+  <img src="docs/screenshots/terminal-dark.png" width="200" alt="Terminal">
+  <img src="docs/screenshots/new-light.png" width="200" alt="New session">
+  <img src="docs/screenshots/keys-dark.png" width="200" alt="Keys sheet">
+</p>
+
 ## Features
 
 | | |
@@ -45,6 +52,8 @@ Moor connects to a machine you can SSH into, keeps every session in tmux there, 
 Prefer to do it by hand? Fill in host, port and user in Settings, then copy the phone's public key into `~/.ssh/authorized_keys` on the host (Settings, Copy install command).
 
 ## Notifications
+
+<p align="center"><img src="docs/screenshots/notification.png" width="420" alt="Task finished notification"></p>
 
 | Event | Source | Default |
 |---|---|---|

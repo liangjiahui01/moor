@@ -6,6 +6,13 @@ Moor 通过 SSH 连到你的机器，每个会话都放在那台机器的 tmux �
 
 [English](README.md)
 
+<p align="center">
+  <img src="docs/screenshots/list-light.png" width="200" alt="会话列表">
+  <img src="docs/screenshots/terminal-dark.png" width="200" alt="终端">
+  <img src="docs/screenshots/new-light.png" width="200" alt="新建会话">
+  <img src="docs/screenshots/keys-dark.png" width="200" alt="按键面板">
+</p>
+
 ## 功能
 
 | | |
@@ -45,6 +52,8 @@ Moor 通过 SSH 连到你的机器，每个会话都放在那台机器的 tmux �
 想手动配置：在设置里填主机、端口、用户名，再把手机公钥加到主机的 `~/.ssh/authorized_keys`（设置 → 复制添加命令）。
 
 ## 通知
+
+<p align="center"><img src="docs/screenshots/notification.png" width="420" alt="任务完成通知"></p>
 
 | 事件 | 来源 | 默认 |
 |---|---|---|
