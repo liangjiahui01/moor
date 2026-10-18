@@ -69,9 +69,14 @@
 
     <!-- session list -->
     <string name="sessions_title">Sessions</string>
-    <string name="group_needs_you">Needs you</string>
-    <string name="group_running">Running</string>
-    <string name="group_idle">Idle</string>
+    <string name="group_pinned">Pinned</string>
+    <string name="group_others">Others</string>
+    <string name="sort_title">Order</string>
+    <string name="sort_created">Created</string>
+    <string name="sort_activity">Recently active</string>
+    <string name="sort_name">Name</string>
+    <string name="menu_pin">Pin to top</string>
+    <string name="menu_unpin">Unpin</string>
     <string name="tag_current">Current</string>
     <string name="status_needs_you">Waiting for your input</string>
     <string name="status_output">Producing output</string>

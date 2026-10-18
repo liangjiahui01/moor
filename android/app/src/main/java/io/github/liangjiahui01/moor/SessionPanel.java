@@ -19,7 +19,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** The session list: a full page over the terminal. Refreshed from the machine every 3 seconds while shown. */
 final class SessionPanel extends FrameLayout {
@@ -39,6 +42,7 @@ final class SessionPanel extends FrameLayout {
     private final View connDot;
     private final LinearLayout list;
     private final View newButton;
+    private final TextView sortChip;
     private Sessions.Listing last;
     private long lastAt;
     private boolean loading;
@@ -85,9 +89,16 @@ final class SessionPanel extends FrameLayout {
         top.addView(new View(c), new LinearLayout.LayoutParams(0, 1, 1f));
         top.addView(Ui.iconButton(c, t, R.drawable.ic_settings, t.sub, c.getString(R.string.k_settings), v -> host.openSettings()));
         head.addView(top);
+        LinearLayout titleRow = Ui.row(c);
+        titleRow.setPadding(0, dp(14), dp(4), 0);
         TextView title = Ui.text(c, c.getString(R.string.sessions_title), 32, t.text, Ui.SEMIBOLD);
-        title.setPadding(0, dp(14), 0, 0);
-        head.addView(title);
+        titleRow.addView(title, Ui.weight(1));
+        sortChip = Ui.text(c, "", 12.5f, t.sub, Ui.MEDIUM);
+        sortChip.setPadding(dp(12), dp(6), dp(12), dp(6));
+        sortChip.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(15)), dp(15)));
+        sortChip.setOnClickListener(v -> showSort());
+        titleRow.addView(sortChip);
+        head.addView(titleRow);
         page.addView(head);
 
         note = Ui.text(c, "", 13, t.text, Ui.REGULAR);
@@ -198,6 +209,7 @@ final class SessionPanel extends FrameLayout {
     private void render() {
         Context c = getContext();
         list.removeAllViews();
+        styleSortChip();
         TermService s = host.service();
         if (s == null || s.state() != TermService.State.CONNECTED) {
             placeholder(c.getString(R.string.list_connecting), c.getString(R.string.list_connecting_body), false);
@@ -216,19 +228,77 @@ final class SessionPanel extends FrameLayout {
             return;
         }
         long now = last.now + (SystemClock.elapsedRealtime() - lastAt) / 1000;
-        List<Sessions.Info> needs = new ArrayList<>(), running = new ArrayList<>(), idle = new ArrayList<>();
-        for (Sessions.Info i : last.items) {
-            if (s.attentionFor(i.name) != null) needs.add(i);
-            else if (now - i.activity < 30 || !Prefs.SHELLS.contains(i.command)) running.add(i);
-            else idle.add(i);
-        }
+        // One flat list in a fixed order (creation time by default), so cards don't jump around as
+        // sessions print; what each one is doing shows on its card. Pinned ones go first.
+        List<Sessions.Info> items = new ArrayList<>(last.items);
+        String sort = sortMode(c);
+        Collections.sort(items, (a, b) -> {
+            int r = sort.equals("activity") ? Long.compare(b.activity, a.activity)
+                : sort.equals("name") ? a.name.compareToIgnoreCase(b.name)
+                : Long.compare(a.created, b.created);
+            return r != 0 ? r : a.name.compareTo(b.name);
+        });
+        Set<String> pins = pins(c);
+        List<Sessions.Info> pinned = new ArrayList<>(), rest = new ArrayList<>();
+        for (Sessions.Info i : items) (pins.contains(i.name) ? pinned : rest).add(i);
         String cur = s.currentSession();
-        section(c.getString(R.string.group_needs_you), needs.size(), t.amber);
-        for (Sessions.Info i : needs) list.addView(card(i, now, i.name.equals(cur), s.attentionFor(i.name)));
-        section(c.getString(R.string.group_running), running.size(), t.sub);
-        for (Sessions.Info i : running) list.addView(card(i, now, i.name.equals(cur), null));
-        section(c.getString(R.string.group_idle), idle.size(), t.sub);
-        for (Sessions.Info i : idle) list.addView(compactCard(i, now, i.name.equals(cur)));
+        if (!pinned.isEmpty()) {
+            section(c.getString(R.string.group_pinned), pinned.size(), t.sub);
+            for (Sessions.Info i : pinned) list.addView(card(i, now, i.name.equals(cur), s.attentionFor(i.name)));
+            section(c.getString(R.string.group_others), rest.size(), t.sub);
+        }
+        for (Sessions.Info i : rest) list.addView(card(i, now, i.name.equals(cur), s.attentionFor(i.name)));
+    }
+
+    // ---- order and pins ----
+
+    private static final String[] SORTS = {"created", "activity", "name"};
+    private static final int[] SORT_LABELS = {R.string.sort_created, R.string.sort_activity, R.string.sort_name};
+
+    static String sortMode(Context c) {
+        return Prefs.raw(c).getString("session_sort", "created");
+    }
+
+    private void styleSortChip() {
+        String m = sortMode(getContext());
+        for (int k = 0; k < SORTS.length; k++) {
+            if (SORTS[k].equals(m)) sortChip.setText(getContext().getString(SORT_LABELS[k]) + " ⇅");
+        }
+    }
+
+    private void showSort() {
+        Context c = getContext();
+        LinearLayout box = Ui.column(c);
+        TextView title = Ui.text(c, c.getString(R.string.sort_title), 18, t.text, Ui.SEMIBOLD);
+        title.setPadding(dp(4), 0, 0, dp(12));
+        box.addView(title);
+        Dialog d = Ui.bottomSheet(c, t, box);
+        String m = sortMode(c);
+        for (int k = 0; k < SORTS.length; k++) {
+            String key = SORTS[k];
+            boolean on = key.equals(m);
+            box.addView(menuItem((on ? "✓  " : "    ") + c.getString(SORT_LABELS[k]), on ? t.accent : t.text, () -> {
+                d.dismiss();
+                Prefs.put(c, "session_sort", key);
+                styleSortChip();
+                render();
+            }));
+        }
+        d.show();
+    }
+
+    /** Pinned session names, per machine. */
+    private static Set<String> pins(Context c) {
+        return new HashSet<>(Prefs.raw(c).getStringSet("pins_" + Prefs.currentId(c), Collections.emptySet()));
+    }
+
+    private void setPinned(String name, boolean on) {
+        Context c = getContext();
+        Set<String> p = pins(c);
+        if (on) p.add(name);
+        else p.remove(name);
+        Prefs.raw(c).edit().putStringSet("pins_" + Prefs.currentId(c), p).apply();
+        render();
     }
 
     private void section(String title, int count, int color) {
@@ -331,24 +401,6 @@ final class SessionPanel extends FrameLayout {
         return card;
     }
 
-    /** Idle sessions: one row. */
-    private View compactCard(Sessions.Info i, long now, boolean current) {
-        Context c = getContext();
-        LinearLayout card = cardShell(current, false);
-        card.setPadding(dp(16), dp(10), dp(10), dp(10));
-        LinearLayout r = Ui.row(c);
-        r.addView(Ui.oneLine(Ui.text(c, i.name, 16, t.text, Ui.SEMIBOLD), TextUtils.TruncateAt.END), Ui.weight(1));
-        r.addView(programChip(i));
-        TextView when = Ui.text(c, current ? c.getString(R.string.tag_current) : ago(c, Math.max(0, now - i.activity)),
-            12, current ? t.accent : t.faint, Ui.REGULAR);
-        when.setPadding(dp(10), 0, 0, 0);
-        r.addView(when);
-        r.addView(moreButton(i));
-        card.addView(r);
-        bindCard(card, i);
-        return card;
-    }
-
     private TextView programChip(Sessions.Info i) {
         TextView chip = Ui.monoText(getContext(), i.command.isEmpty() ? "shell" : i.command, 11.5f, t.text);
         chip.setPadding(dp(8), dp(3), dp(8), dp(3));
@@ -424,6 +476,9 @@ final class SessionPanel extends FrameLayout {
         box.addView(title);
         Dialog d = Ui.bottomSheet(c, t, box);
         box.addView(menuItem(c.getString(R.string.menu_open), t.text, () -> { d.dismiss(); open(i.name); }));
+        boolean pinned = pins(c).contains(i.name);
+        box.addView(menuItem(c.getString(pinned ? R.string.menu_unpin : R.string.menu_pin), t.text,
+            () -> { d.dismiss(); setPinned(i.name, !pinned); }));
         box.addView(menuItem(c.getString(R.string.menu_rename), t.text, () -> { d.dismiss(); showRename(i); }));
         box.addView(menuItem(c.getString(R.string.menu_close), t.red, () -> { d.dismiss(); confirmKill(i); }));
         d.show();
@@ -574,6 +629,10 @@ final class SessionPanel extends FrameLayout {
             TermService s = host.service();
             if (s != null) s.renameSession(i.name, n, (v2, err) -> {
                 if (err != null) toast(c.getString(R.string.err_rename_failed, err));
+                else if (pins(c).contains(i.name)) {
+                    setPinned(i.name, false);
+                    setPinned(n, true);
+                }
                 refresh();
             });
         });

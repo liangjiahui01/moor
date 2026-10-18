@@ -58,9 +58,14 @@
     <string name="notif_bell">%1$s 响铃</string>
 
     <string name="sessions_title">会话</string>
-    <string name="group_needs_you">需要你处理</string>
-    <string name="group_running">运行中</string>
-    <string name="group_idle">空闲</string>
+    <string name="group_pinned">置顶</string>
+    <string name="group_others">其他</string>
+    <string name="sort_title">排序</string>
+    <string name="sort_created">创建时间</string>
+    <string name="sort_activity">最近活跃</string>
+    <string name="sort_name">名称</string>
+    <string name="menu_pin">置顶</string>
+    <string name="menu_unpin">取消置顶</string>
     <string name="tag_current">当前</string>
     <string name="status_needs_you">等你输入</string>
     <string name="status_output">正在输出</string>
