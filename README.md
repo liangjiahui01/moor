@@ -24,7 +24,7 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 | One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. |
 | Voice input | Tap the mic key and talk: the text appears live above the keys, then insert it or send it, without opening the keyboard. Uses Volcengine (Doubao) streaming speech recognition with your own key. |
 | Images | Send a photo or screenshot to the session (photos, camera, or share from another app). It is copied to the machine and its path typed in, which Claude Code reads as an image. |
-| Phone-first keys | One row of keys, swipe up on a key for its second function, a sheet with symbols, Ctrl combos, paste and an input box for dictation. |
+| Phone-first keys | One row of full-size keys that scrolls sideways (most used first; voice, keyboard and the sheet stay put), swipe up on a key for its second function, a sheet with symbols, Ctrl combos, paste and an input box for dictation. |
 | Light and dark | Follows the system, or pick one. |
 | Ghostty look | Catppuccin Mocha / Latte colors, JetBrains Mono with symbol and Nerd Font icons, bar cursor; Chinese glyphs sit centred in two columns. |
 

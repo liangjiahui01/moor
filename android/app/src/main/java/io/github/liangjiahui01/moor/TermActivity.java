@@ -316,12 +316,13 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     };
 
     // ---- key bar ----
-    // Portrait: one row of common keys; swipe up on a key for the small label in its corner;
-    // the last key opens a sheet with symbols, Ctrl combos and actions. Wide screens get more keys in the row.
+    // One row: keys that scroll sideways (most used first, each wide enough to hit), then voice, keyboard and
+    // the sheet with symbols, Ctrl combos and actions, which stay put. Swipe up on a key for the small label in
+    // its corner. On a wide screen the scrolling keys all fit and share the space.
 
-    private static final String[] MAIN = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "⏎", "🎤", "⌨", "⋯"};
-    private static final String[] WIDE = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "⏎",
-        "HOME", "END", "PGUP", "PGDN", "/", "-", "|", "~", "🎤", "⌨", "⋯"};
+    private static final String[] SCROLL_KEYS = {"ESC", "⏎", "↑", "↓", "←", "→", "TAB", "CTRL", "ALT",
+        "HOME", "END", "PGUP", "PGDN", "/", "-", "|", "~"};
+    private static final String[] FIXED_KEYS = {"🎤", "⌨", "⋯"};
     private static final String[][] SYMBOLS = {
         {"/", "-", "_", "|", "~", "`", "=", "\\", "$", "&"},
         {"'", "\"", "<", ">", "(", ")", "[", "]", "{", "}"},
@@ -345,7 +346,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         keyArea.removeAllViews();
         ctrlKey = altKey = null;
         moreKey = micKey = null;
-        boolean wide = getResources().getConfiguration().screenWidthDp >= 600;
         morePanel = buildMorePanel();
         morePanel.setVisibility(View.GONE);
         keyArea.addView(morePanel);
@@ -353,10 +353,33 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (voiceBar.getParent() != null) ((android.view.ViewGroup) voiceBar.getParent()).removeView(voiceBar);
         keyArea.addView(voiceBar);
         LinearLayout row = Ui.row(this);
-        row.setPadding(dp(6), dp(3), dp(6), dp(3));
-        for (String k : wide ? WIDE : MAIN) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(34), 1f);
+        row.setPadding(dp(3.5f), dp(3), dp(6), dp(3));
+
+        android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroller.setFillViewport(true);
+        // A soft fade at the edges shows there is more to scroll to
+        scroller.setHorizontalFadingEdgeEnabled(true);
+        scroller.setFadingEdgeLength(dp(18));
+        LinearLayout strip = Ui.row(this);
+        for (String k : SCROLL_KEYS) {
+            // 44 dp each; weight shares out any spare width when they all fit
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(34), 1f);
             lp.setMargins(dp(2.5f), 0, dp(2.5f), 0);
+            strip.addView(keyCell(k, false), lp);
+        }
+        scroller.addView(strip, new android.widget.FrameLayout.LayoutParams(-2, -1));
+        row.addView(scroller, new LinearLayout.LayoutParams(0, dp(34), 1f));
+
+        View sep = new View(this);
+        sep.setBackgroundColor(t.line);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(dp(1), dp(22));
+        sl.setMargins(dp(3), 0, dp(3), 0);
+        row.addView(sep, sl);
+        for (String k : FIXED_KEYS) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(42), dp(34));
+            lp.setMargins(dp(2.5f), 0, 0, 0);
             row.addView(keyCell(k, false), lp);
         }
         keyArea.addView(row);
