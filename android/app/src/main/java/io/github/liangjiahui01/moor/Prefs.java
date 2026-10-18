@@ -26,6 +26,7 @@ final class Prefs {
     final String session;
     final int fontSize;
     final boolean imeCompat;
+    final boolean keepScreenOn;
     /** "system", "dark" or "light". */
     final String theme;
     final boolean notifyAttention, notifyDone, notifyBell;
@@ -51,6 +52,7 @@ final class Prefs {
         saved = m.getBoolean("saved", false) || m.contains("host");
         fontSize = g.getInt("font_size", 0);
         imeCompat = g.getBoolean("ime_compat", false);
+        keepScreenOn = g.getBoolean("keep_screen_on", true);
         theme = g.getString("theme", "system");
         notifyAttention = g.getBoolean("notify_attention", true);
         notifyDone = g.getBoolean("notify_done", true);

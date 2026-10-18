@@ -266,4 +266,6 @@
     <string name="update_notes">What\'s new</string>
     <string name="update_later">Later</string>
     <string name="k_redraw">Redraw</string>
+    <string name="t_screen_on">Keep the screen on</string>
+    <string name="t_screen_on_sub">While a session is open in Moor</string>
 </resources>

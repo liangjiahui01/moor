@@ -250,4 +250,6 @@
     <string name="update_notes">更新说明</string>
     <string name="update_later">以后再说</string>
     <string name="k_redraw">刷新画面</string>
+    <string name="t_screen_on">会话中保持亮屏</string>
+    <string name="t_screen_on_sub">在 Moor 里打开会话时屏幕不自动熄灭</string>
 </resources>

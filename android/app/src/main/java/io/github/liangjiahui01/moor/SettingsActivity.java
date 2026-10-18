@@ -198,6 +198,8 @@ public class SettingsActivity extends Activity {
         LinearLayout term = card();
         term.addView(themeRow(p.theme));
         term.addView(divider());
+        term.addView(toggleRow(R.string.t_screen_on, R.string.t_screen_on_sub, p.keepScreenOn, "keep_screen_on"));
+        term.addView(divider());
         term.addView(toggleRow(R.string.t_ime, R.string.t_ime_sub, p.imeCompat, "ime_compat"));
         page.addView(term);
 

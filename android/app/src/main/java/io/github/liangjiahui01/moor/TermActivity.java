@@ -206,6 +206,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     protected void onResume() {
         super.onResume();
         Updates.checkDaily(this);
+        // The setting may have changed in Settings
+        if (service != null) view.setKeepScreenOn(service.currentSession() != null && Prefs.load(this).keepScreenOn);
         if (Theme.get(this).dark != themeDark) {
             recreate();
             return;
@@ -1075,6 +1077,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     public void onAttached(String name) {
         panel.hide();
+        // In a session the screen stays on (only while Moor is in front)
+        view.setKeepScreenOn(Prefs.load(this).keepScreenOn);
         main.postDelayed(this::sendPendingImage, 300);
         view.requestFocus();
         refreshTitle();
@@ -1085,6 +1089,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     public void onShowSessions(String note) {
         panel.show(note);
+        view.setKeepScreenOn(false);
     }
 
     @Override
