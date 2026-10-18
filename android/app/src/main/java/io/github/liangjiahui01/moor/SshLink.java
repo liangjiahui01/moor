@@ -22,7 +22,10 @@ import java.util.Properties;
 final class SshLink implements TerminalSession.Transport {
 
     interface Listener {
-        /** The terminal channel ended. sessionAlive=false: the whole connection dropped; true: only this channel exited (session ended or swapped). */
+        /**
+         * The terminal channel ended, or the connection dropped. sessionAlive=false: the whole connection is gone
+         * (channel may be null when no terminal was attached); true: only this channel exited (session ended or swapped).
+         */
         void onChannelClosed(SshLink link, Channel channel, boolean sessionAlive, String reason);
     }
 
@@ -53,13 +56,7 @@ final class SshLink implements TerminalSession.Transport {
         cfg.put("compression.c2s", "none");
         // With a saved host key, prefer the same key type so a different algorithm is not mistaken for a changed key (pairing saves ed25519)
         String savedType = savedHostKeyType(knownHosts, prefs.host + ":" + prefs.port);
-        if (savedType != null) {
-            StringBuilder algs = new StringBuilder(savedType);
-            for (String a : JSch.getConfig("server_host_key").split(",")) {
-                if (!a.equals(savedType)) algs.append(',').append(a);
-            }
-            cfg.put("server_host_key", algs.toString());
-        }
+        if (savedType != null) cfg.put("server_host_key", preferHostKeyType(savedType, false));
         s.setConfig(cfg);
         s.setServerAliveInterval(10_000);
         s.setServerAliveCountMax(3);
@@ -103,9 +100,11 @@ final class SshLink implements TerminalSession.Transport {
                     reason = REASON_NETWORK;
                     android.util.Log.i("SshLink", "read ended: " + e);
                 }
-                boolean alive = !closed && session.isConnected();
-                if (!alive) close();
-                listener.onChannelClosed(SshLink.this, ch, alive, reason);
+                if (closed || !session.isConnected()) {
+                    close(); // reports the dropped connection
+                    return;
+                }
+                listener.onChannelClosed(SshLink.this, ch, true, reason);
             }
         };
         reader.setDaemon(true);
@@ -138,6 +137,8 @@ final class SshLink implements TerminalSession.Transport {
                 } finally {
                     if (ch != null) ch.disconnect();
                 }
+                // The events stream outlives every screen, so it is what notices a dead connection on the session list
+                if (!closed && !session.isConnected()) close();
             }
         };
         t.setDaemon(true);
@@ -193,6 +194,21 @@ final class SshLink implements TerminalSession.Transport {
     }
 
     /** Saves the host key on first connect; disconnects if it changes later, so an impostor host can't take over. */
+    /**
+     * Host key algorithms putting those of one key type first (only those when exclusive). An "ssh-rsa" key is
+     * signed with rsa-sha2-512/256 by current servers, so all three RSA names count as that type.
+     */
+    static String preferHostKeyType(String type, boolean exclusive) {
+        String[] own = type.equals("ssh-rsa") ? new String[] {"rsa-sha2-512", "rsa-sha2-256", "ssh-rsa"} : new String[] {type};
+        StringBuilder algs = new StringBuilder(String.join(",", own));
+        if (!exclusive) {
+            for (String a : JSch.getConfig("server_host_key").split(",")) {
+                if (!java.util.Arrays.asList(own).contains(a)) algs.append(',').append(a);
+            }
+        }
+        return algs.toString();
+    }
+
     private static String savedHostKeyType(File store, String id) {
         if (!store.exists()) return null;
         java.util.Properties known = new java.util.Properties();
@@ -270,11 +286,15 @@ final class SshLink implements TerminalSession.Transport {
         return session.getHostKey().getType() + " " + session.getHostKey().getKey();
     }
 
+    /** Ends the connection and reports it once as dropped (the owner ignores links it already let go of). */
     void close() {
-        if (closed) return;
-        closed = true;
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+        }
         ctl.shutdown();
         detach();
         try { session.disconnect(); } catch (Exception ignored) { }
+        listener.onChannelClosed(this, null, false, REASON_NETWORK);
     }
 }

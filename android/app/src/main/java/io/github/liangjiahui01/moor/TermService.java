@@ -476,6 +476,8 @@ public class TermService extends Service {
                 Sessions.Listing r = Sessions.parse(l.exec(Sessions.listCommand(), null, 8_000));
                 main.post(() -> cb.done(r, null));
             } catch (Exception e) {
+                // A dead connection: close it, which starts a reconnect
+                if (!l.probe()) l.close();
                 main.post(() -> cb.done(null, getString(R.string.err_list_failed, e.getMessage())));
             }
         });
@@ -649,7 +651,7 @@ public class TermService extends Service {
                     Log.i(TAG, "default network changed");
                     if (link != null) {
                         SshLink l = link;
-                        io.execute(l::close); // the reader ends and triggers a reconnect
+                        io.execute(l::close); // close() reports the drop, which reconnects
                     } else if (state == State.WAITING) {
                         attempt = 0;
                         main.removeCallbacks(reconnect);
@@ -719,7 +721,7 @@ public class TermService extends Service {
         if (netCallback != null) {
             try { getSystemService(ConnectivityManager.class).unregisterNetworkCallback(netCallback); } catch (Exception ignored) { }
         }
-        if (link != null) { SshLink l = link; io.execute(l::close); }
+        if (link != null) { SshLink l = link; link = null; io.execute(l::close); }
         term.finish();
         io.shutdown();
         super.onDestroy();

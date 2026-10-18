@@ -245,7 +245,6 @@
     <string name="setup_skipped">Not included: %1$s</string>
     <string name="setup_none">Couldn\'t reach any machine</string>
     <string name="setup_need_python">needs python3</string>
-    <string name="setup_no_ed25519">no ed25519 host key</string>
     <string name="setup_confirm_title">Set up this device</string>
     <string name="setup_confirm_body">Adds these machines and the other device\'s settings:\n%1$s</string>
     <string name="setup_confirm_voice">Includes the voice key.</string>

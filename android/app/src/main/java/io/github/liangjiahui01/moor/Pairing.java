@@ -25,16 +25,21 @@ import java.util.Properties;
 final class Pairing {
     static final String PREFIX = "moor://pair?";
 
-    final String host, user, cmd, hostKey, id, name;
+    /** Host key types a pairing link may pin. */
+    static final java.util.List<String> HOST_KEY_TYPES = java.util.Arrays.asList(
+        "ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa");
+
+    final String host, user, cmd, hostKeyType, hostKey, id, name;
     final int port;
     final long expiresAt;
     private final byte[] seed;
 
-    private Pairing(String host, int port, String user, String cmd, String hostKey, byte[] seed, String id, long exp, String name) {
+    private Pairing(String host, int port, String user, String cmd, String hostKeyType, String hostKey, byte[] seed, String id, long exp, String name) {
         this.host = host;
         this.port = port;
         this.user = user;
         this.cmd = cmd;
+        this.hostKeyType = hostKeyType;
         this.hostKey = hostKey;
         this.seed = seed;
         this.id = id;
@@ -62,7 +67,11 @@ final class Pairing {
             String e = u.getQueryParameter("exp");
             String id = u.getQueryParameter("id");
             String n = u.getQueryParameter("n");
-            return new Pairing(host, p == null ? 22 : Integer.parseInt(p), user, c == null ? "" : c, hk, seed,
+            // Older links carry no type: their key is ed25519
+            String t = u.getQueryParameter("hkt");
+            if (t == null) t = "ssh-ed25519";
+            if (!HOST_KEY_TYPES.contains(t)) return null;
+            return new Pairing(host, p == null ? 22 : Integer.parseInt(p), user, c == null ? "" : c, t, hk, seed,
                 id == null ? "" : id, e == null ? 0 : Long.parseLong(e) * 1000, n == null ? "" : n.trim());
         } catch (RuntimeException ex) {
             return null;
@@ -84,12 +93,12 @@ final class Pairing {
         Properties cfg = new Properties();
         cfg.put("StrictHostKeyChecking", "no");
         cfg.put("PreferredAuthentications", "publickey");
-        cfg.put("server_host_key", "ssh-ed25519");
+        cfg.put("server_host_key", SshLink.preferHostKeyType(hostKeyType, true));
         s.setConfig(cfg);
         s.setTimeout(10_000);
         try {
             s.connect(8_000);
-            if (!hostKey.equals(s.getHostKey().getKey())) throw new PairException(c.getString(R.string.pair_err_hostkey));
+            if (!hostKeyType.equals(s.getHostKey().getType()) || !hostKey.equals(s.getHostKey().getKey())) throw new PairException(c.getString(R.string.pair_err_hostkey));
             ChannelExec ch = (ChannelExec) s.openChannel("exec");
             ch.setCommand("claim");
             InputStream in = ch.getInputStream();
@@ -127,7 +136,7 @@ final class Pairing {
         if (store.exists()) {
             try (java.io.FileInputStream f = new java.io.FileInputStream(store)) { known.load(f); }
         }
-        known.setProperty(host + ":" + port, "ssh-ed25519 " + hostKey);
+        known.setProperty(host + ":" + port, hostKeyType + " " + hostKey);
         try (java.io.FileOutputStream f = new java.io.FileOutputStream(store)) { known.store(f, null); }
     }
 

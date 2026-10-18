@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Moor server helper. Runs on the machine you SSH into; needs only Python 3.
 
-    moor pair [--host H] [--port 22] [--cmd CMD] [--name NAME] [--minutes 10]
+    moor pair [--host H] [--port 22] [--sshd-port P] [--cmd CMD] [--name NAME] [--minutes 10]
         Print a one-time QR code and link. Scan it in the Moor app to set up the
         connection and register the phone's SSH key in one step.
     moor new NAME [--cmd CMD] [--cwd DIR] / ls / attach NAME / kill NAME / rename NAME NEW
@@ -49,7 +49,8 @@ import urllib.parse
 HOME = pathlib.Path.home()
 # The two variables below exist for tests that run a throwaway sshd.
 AK = pathlib.Path(os.environ.get("MOOR_AUTHORIZED_KEYS", HOME / ".ssh" / "authorized_keys"))
-HOST_KEY = pathlib.Path(os.environ.get("MOOR_HOST_KEY", "/etc/ssh/ssh_host_ed25519_key.pub"))
+# Host key types the app can pin, in order of preference
+HOST_KEY_TYPES = ["ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa"]
 EVENTS = pathlib.Path(os.environ.get("MOOR_EVENTS", HOME / ".local" / "state" / "moor" / "events.log"))
 CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
 MARK = "moor-pair:"
@@ -159,8 +160,34 @@ def invite(pid, minutes):
     print(f"ok {int(expires.timestamp())}")
 
 
+def host_key(ports):
+    """(type, base64) of the host key this machine's sshd presents, asking sshd itself: a key file on disk is
+    only used if sshd_config loads it. MOOR_HOST_KEY (a .pub file) overrides, e.g. for a second sshd."""
+    override = os.environ.get("MOOR_HOST_KEY")
+    if override:
+        t, k = pathlib.Path(override).read_text().split()[:2]
+        return t, k
+    for port in ports:
+        try:
+            r = subprocess.run(["ssh-keyscan", "-T", "5", "-p", str(port), "localhost"],
+                               capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        keys = {}
+        for line in r.stdout.splitlines():
+            f = line.split()
+            if len(f) >= 3 and not line.startswith("#"):
+                keys.setdefault(f[1], f[2])
+        for t in HOST_KEY_TYPES:
+            if t in keys:
+                return t, keys[t]
+    sys.exit("Could not read this machine's SSH host key (ssh-keyscan localhost on port %s). "
+             "If sshd listens on another port, pass --sshd-port." % "/".join(map(str, ports)))
+
+
 def pair(args):
-    host_key = HOST_KEY.read_text().split()[1]
+    ports = [args.sshd_port] if args.sshd_port else list(dict.fromkeys([args.port, 22]))
+    hk_type, hk = host_key(ports)
     pid = secrets.token_hex(4)
     expires = datetime.datetime.now() + datetime.timedelta(minutes=args.minutes)
     with tempfile.TemporaryDirectory() as d:
@@ -173,7 +200,7 @@ def pair(args):
     q = {
         "v": "1", "h": args.host, "p": str(args.port), "u": getpass.getuser(), "c": args.cmd,
         "n": args.name or socket.gethostname().split(".")[0],
-        "hk": host_key, "k": base64.urlsafe_b64encode(seed).decode().rstrip("="),
+        "hkt": hk_type, "hk": hk, "k": base64.urlsafe_b64encode(seed).decode().rstrip("="),
         "id": pid, "exp": str(int(expires.timestamp())),
     }
     url = "moor://pair?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote)
@@ -1902,7 +1929,9 @@ def main():
     elif a[:1] == ["pair"]:
         ap = argparse.ArgumentParser(prog="moor pair", description="Print a one-time pairing QR code for the Moor app")
         ap.add_argument("--host", default=default_host(), help="address the phone uses to reach this machine (default: first IPv4)")
-        ap.add_argument("--port", type=int, default=22)
+        ap.add_argument("--port", type=int, default=22, help="port the phone connects to")
+        ap.add_argument("--sshd-port", type=int, default=0,
+                        help="port sshd listens on here, when the phone comes in through a forwarded port (default: --port, then 22)")
         ap.add_argument("--cmd", default="", help="default command for new sessions on the phone, e.g. claude")
         ap.add_argument("--name", default="", help="name shown in the app (default: this machine's hostname)")
         ap.add_argument("--minutes", type=int, default=10, help="how long the code stays valid (default 10)")

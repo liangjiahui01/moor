@@ -229,7 +229,6 @@
     <string name="setup_skipped">没有包含：%1$s</string>
     <string name="setup_none">一台机器都连不上</string>
     <string name="setup_need_python">需要 python3</string>
-    <string name="setup_no_ed25519">没有 ed25519 主机密钥</string>
     <string name="setup_confirm_title">配置这台设备</string>
     <string name="setup_confirm_body">将添加这些机器，并导入另一台设备的设置：\n%1$s</string>
     <string name="setup_confirm_voice">包含语音密钥。</string>
