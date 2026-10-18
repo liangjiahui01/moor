@@ -26,7 +26,7 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 | Images | Send a photo or screenshot to the session (photos, camera, or share from another app). It is copied to the machine and its path typed in, which Claude Code reads as an image. |
 | Phone-first keys | One row of keys, swipe up on a key for its second function, a sheet with symbols, Ctrl combos, paste and an input box for dictation. |
 | Light and dark | Follows the system, or pick one. |
-| Ghostty look | Catppuccin Mocha / Latte colors, JetBrains Mono, bar cursor; Chinese glyphs sit centred in two columns. |
+| Ghostty look | Catppuccin Mocha / Latte colors, JetBrains Mono with symbol and Nerd Font icons, bar cursor; Chinese glyphs sit centred in two columns. |
 
 ## Requirements
 

@@ -34,6 +34,8 @@ public final class TerminalRenderer {
     private final int mFontAscent;
     /** The {@link #mFontLineSpacing} + {@link #mFontAscent}. */
     final int mFontLineSpacingAndAscent;
+    /** Box drawing and block glyphs are drawn for the font's own line height; this stretches them to the taller row. */
+    private final float mBoxStretch;
 
     private final float[] asciiMeasures = new float[127];
 
@@ -51,6 +53,7 @@ public final class TerminalRenderer {
         int spacing = (int) Math.ceil(mTextPaint.getFontSpacing());
         int extra = Math.round(spacing * CELL_HEIGHT_EXTRA);
         mFontLineSpacing = spacing + extra;
+        mBoxStretch = mFontLineSpacing / (float) spacing;
         // Half the extra space above the glyphs, half below
         mFontAscent = (int) Math.ceil(mTextPaint.ascent()) - extra / 2;
         mFontLineSpacingAndAscent = mFontLineSpacing + mFontAscent;
@@ -100,6 +103,7 @@ public final class TerminalRenderer {
             int lastRunStartColumn = -1;
             int lastRunStartIndex = 0;
             boolean lastRunFontWidthMismatch = false;
+            boolean lastRunBox = false;
             int currentCharIndex = 0;
             float measuredWidthForRun = 0.f;
 
@@ -120,8 +124,10 @@ public final class TerminalRenderer {
                 final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
                     currentCharIndex, charsForCodePoint);
                 final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
+                final boolean box = isBoxGlyph(codePoint);
 
-                if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {
+                if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch
+                    || box != lastRunBox) {
                     if (column == 0) {
                         // Skip first column as there is nothing to draw, just record the current style.
                     } else {
@@ -134,7 +140,7 @@ public final class TerminalRenderer {
                         }
                         drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
                             lastRunStartIndex, charsSinceLastRun, measuredWidthForRun,
-                            cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
+                            cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection, lastRunBox);
                     }
                     measuredWidthForRun = 0.f;
                     lastRunStyle = style;
@@ -143,6 +149,7 @@ public final class TerminalRenderer {
                     lastRunStartColumn = column;
                     lastRunStartIndex = currentCharIndex;
                     lastRunFontWidthMismatch = fontWidthMismatch;
+                    lastRunBox = box;
                 }
                 measuredWidthForRun += measuredCodePointWidth;
                 column += codePointWcWidth;
@@ -162,13 +169,13 @@ public final class TerminalRenderer {
                 invertCursorTextColor = true;
             }
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
-                measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
+                measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection, lastRunBox);
         }
     }
 
     private void drawTextRun(Canvas canvas, char[] text, int[] palette, float y, int startColumn, int runWidthColumns,
                              int startCharIndex, int runWidthChars, float mes, int cursor, int cursorStyle,
-                             long textStyle, boolean reverseVideo) {
+                             long textStyle, boolean reverseVideo, boolean box) {
         int foreColor = TextStyle.decodeForeColor(textStyle);
         final int effect = TextStyle.decodeEffect(textStyle);
         int backColor = TextStyle.decodeBackColor(textStyle);
@@ -194,35 +201,41 @@ public final class TerminalRenderer {
             backColor = tmp;
         }
 
-        float left = startColumn * mFontWidth;
-        float right = left + runWidthColumns * mFontWidth;
+        final float left = startColumn * mFontWidth;
+        final float right = left + runWidthColumns * mFontWidth;
+        final float cellTop = y - mFontLineSpacing;
 
-        mes = mes / mFontWidth;
-        boolean savedMatrix = false;
-        float textShift = 0;
-        if (mes < runWidthColumns - 0.01 && mes > runWidthColumns / 2f) {
-            // A narrower glyph from a fallback font (CJK is 1 em, two cells are 1.2 em): centre it, don't stretch it
-            textShift = (runWidthColumns - mes) * mFontWidth / 2;
-        } else if (Math.abs(mes - runWidthColumns) > 0.01) {
-            canvas.save();
-            canvas.scale(runWidthColumns / mes, 1.f);
-            left *= mes / runWidthColumns;
-            right *= mes / runWidthColumns;
-            savedMatrix = true;
-        }
-
+        // Background and cursor fill the cell, untransformed
         if (backColor != palette[TextStyle.COLOR_INDEX_BACKGROUND]) {
             // Only draw non-default background.
             mTextPaint.setColor(backColor);
-            canvas.drawRect(left, y - mFontLineSpacingAndAscent + mFontAscent, right, y, mTextPaint);
+            canvas.drawRect(left, cellTop, right, y, mTextPaint);
         }
 
         if (cursor != 0) {
             mTextPaint.setColor(cursor);
-            float cursorHeight = mFontLineSpacingAndAscent - mFontAscent;
-            if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_UNDERLINE) cursorHeight /= 4.;
-            else if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR) right = left + Math.max(2f, mFontWidth / 5);
-            canvas.drawRect(left, y - cursorHeight, right, y, mTextPaint);
+            float top = cellTop, r = right;
+            if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_UNDERLINE) top = y - mFontLineSpacing / 4f;
+            else if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR) r = left + Math.max(2f, mFontWidth / 5);
+            canvas.drawRect(left, top, r, y, mTextPaint);
+        }
+
+        // A run whose width differs from its cells is a single code point (see render()). A narrower one (CJK from a
+        // fallback font: 1 em in 1.2 em) is centred as is; a wider one (a symbol from a fallback font) is shrunk to fit,
+        // keeping its shape; a much narrower one is stretched across.
+        mes = mes / mFontWidth;
+        float textShift = 0, sx = 1, sy = 1;
+        if (mes < runWidthColumns - 0.01 && mes > runWidthColumns / 2f) {
+            textShift = (runWidthColumns - mes) * mFontWidth / 2;
+        } else if (Math.abs(mes - runWidthColumns) > 0.01) {
+            sx = runWidthColumns / mes;
+            if (sx < 1) sy = sx;
+        }
+        if (box) sy *= mBoxStretch;
+        final boolean savedMatrix = sx != 1 || sy != 1;
+        if (savedMatrix) {
+            canvas.save();
+            canvas.scale(sx, sy, left, cellTop + mFontLineSpacing / 2f);
         }
 
         if ((effect & TextStyle.CHARACTER_ATTRIBUTE_INVISIBLE) == 0) {
@@ -250,6 +263,11 @@ public final class TerminalRenderer {
         }
 
         if (savedMatrix) canvas.restore();
+    }
+
+    /** Box drawing, block elements, powerline separators and legacy computing blocks: they must touch the next row. */
+    private static boolean isBoxGlyph(int cp) {
+        return (cp >= 0x2500 && cp <= 0x259F) || (cp >= 0xE0B0 && cp <= 0xE0D7) || (cp >= 0x1FB00 && cp <= 0x1FBFF);
     }
 
     public float getFontWidth() {

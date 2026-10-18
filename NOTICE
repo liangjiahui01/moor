@@ -20,4 +20,8 @@ It includes or bundles the following third-party work:
 - OkHttp (https://github.com/square/okhttp), Apache License 2.0.
 - JetBrains Mono (https://github.com/JetBrains/JetBrainsMono), SIL Open Font License 1.1.
   Bundled in android/app/src/main/assets/term-fonts/ with its license file.
+- Noto Sans Symbols 2 (https://github.com/notofonts/symbols), SIL Open Font License 1.1.
+  Bundled as a subset without the characters that default to emoji, with its license file.
+- Symbols Nerd Font (https://github.com/ryanoasis/nerd-fonts), MIT License; its icons come from
+  the projects listed at https://github.com/ryanoasis/nerd-fonts#glyph-sets. Bundled with its license file.
 - Catppuccin color palettes (https://github.com/catppuccin/catppuccin), MIT License.

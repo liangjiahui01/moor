@@ -43,27 +43,43 @@ final class Ui {
         return faces[weight];
     }
 
-    /** Terminal font: JetBrains Mono, as in Ghostty; CJK falls back to the system font, centred in two cells. */
+    /**
+     * Terminal font, as in Ghostty: JetBrains Mono, then symbol fonts (Noto Sans Symbols 2 without the characters
+     * that default to emoji, and Symbols Nerd Font for icons), then the system fonts for CJK and emoji.
+     */
     static Typeface mono(Context c) {
-        if (mono == null) {
-            try {
-                mono = Typeface.createFromAsset(c.getAssets(), "term-fonts/JetBrainsMono-Regular.ttf");
-            } catch (RuntimeException e) {
-                mono = Typeface.MONOSPACE;
-            }
-        }
+        if (mono == null) mono = termFace(c, "JetBrainsMono-Regular.ttf", false);
         return mono;
     }
 
     static Typeface monoBold(Context c) {
-        if (monoBold == null) {
+        if (monoBold == null) monoBold = termFace(c, "JetBrainsMono-Bold.ttf", true);
+        return monoBold;
+    }
+
+    private static Typeface termFace(Context c, String file, boolean bold) {
+        android.content.res.AssetManager am = c.getAssets();
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
             try {
-                monoBold = Typeface.createFromAsset(c.getAssets(), "term-fonts/JetBrainsMono-Bold.ttf");
-            } catch (RuntimeException e) {
-                monoBold = Typeface.create(mono(c), Typeface.BOLD);
+                android.graphics.fonts.FontFamily main = new android.graphics.fonts.FontFamily.Builder(
+                    new android.graphics.fonts.Font.Builder(am, "term-fonts/" + file).build()).build();
+                Typeface.CustomFallbackBuilder b = new Typeface.CustomFallbackBuilder(main);
+                for (String f : new String[]{"NotoSansSymbols2-Text.ttf", "SymbolsNerdFontMono-Regular.ttf"}) {
+                    b.addCustomFallback(new android.graphics.fonts.FontFamily.Builder(
+                        new android.graphics.fonts.Font.Builder(am, "term-fonts/" + f).build()).build());
+                }
+                return b.setSystemFallback("sans-serif")
+                    .setStyle(new android.graphics.fonts.FontStyle(bold ? 700 : 400, android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT))
+                    .build();
+            } catch (Exception e) {
+                // fall through to the plain font
             }
         }
-        return monoBold;
+        try {
+            return Typeface.createFromAsset(am, "term-fonts/" + file);
+        } catch (RuntimeException e) {
+            return bold ? Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) : Typeface.MONOSPACE;
+        }
     }
 
     static int dp(Context c, float v) {
