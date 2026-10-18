@@ -129,6 +129,8 @@
     <string name="k_kill_word">Kill word</string>
     <string name="k_details">Details</string>
     <string name="k_reconnect">Reconnect</string>
+    <string name="k_show_bar">Show title bar</string>
+    <string name="k_hide_bar">Hide title bar</string>
     <string name="k_settings">Settings</string>
     <string name="k_font_size">Font size</string>
     <string name="input_hint">Type a command…</string>

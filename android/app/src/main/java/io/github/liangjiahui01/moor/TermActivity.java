@@ -111,6 +111,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         root.setBackgroundColor(t.bg);
         topBar = buildTopBar();
         root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(40)));
+        // Hidden unless turned on in the sheet: the session list is a key in the strip (and the back gesture)
+        showTopBar = Prefs.raw(this).getBoolean("top_bar", false);
+        topBar.setVisibility(showTopBar ? View.VISIBLE : View.GONE);
 
         termBox = new FrameLayout(this);
         view = new TerminalView(this, null);
@@ -334,6 +337,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private static final Set<String> REPEAT = new HashSet<>(Arrays.asList("←", "↓", "↑", "→", "PGUP", "PGDN"));
 
     private EditText input;
+    private boolean showTopBar;
     private long inputBlurAt;
     private View sendBtn;
 
@@ -352,9 +356,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         scroller.setHorizontalFadingEdgeEnabled(true);
         scroller.setFadingEdgeLength(dp(18));
         LinearLayout strip = Ui.row(this);
-        strip.setPadding(dp(6), dp(6), dp(6), dp(4));
-        strip.addView(iconKey(R.drawable.ic_keyboard, R.string.a11y_keyboard, "⌨"), pillLp(dp(46)));
-        strip.addView(pillKey("»", "⋯"), pillLp(dp(46)));
+        strip.setPadding(dp(6), dp(5), dp(6), dp(2));
+        if (!showTopBar) strip.addView(iconKey(R.drawable.ic_sessions, R.string.a11y_sessions, "SESSIONS"), pillLp(dp(40)));
+        strip.addView(iconKey(R.drawable.ic_keyboard, R.string.a11y_keyboard, "⌨"), pillLp(dp(40)));
+        strip.addView(pillKey("»", "⋯"), pillLp(dp(40)));
         for (String[] k : STRIP) strip.addView(pillKey(k[0], k[1]), pillLp(-2));
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
         keyArea.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
@@ -364,24 +369,24 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     }
 
     private LinearLayout.LayoutParams pillLp(int width) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(width, dp(36));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(width, dp(30));
         lp.setMargins(dp(3), 0, dp(3), 0);
         return lp;
     }
 
     private android.graphics.drawable.Drawable keyBg(boolean on) {
-        return on ? Ui.round(t.accent, dp(10)) : t.dark ? Ui.round(t.key, dp(10)) : Ui.outline(t.key, t.line, dp(1), dp(10));
+        return on ? Ui.round(t.accent, dp(8)) : t.dark ? Ui.round(t.key, dp(8)) : Ui.outline(t.key, t.line, dp(1), dp(8));
     }
 
     /** A key with a name on it, as wide as its name. */
     private View pillKey(String label, String key) {
         FrameLayout cell = new FrameLayout(this);
         cell.setBackground(keyBg(false));
-        TextView b = Ui.text(this, label, 13.5f, t.text, Ui.REGULAR);
+        TextView b = Ui.text(this, label, 12.5f, t.text, Ui.REGULAR);
         b.setTypeface(Ui.mono(this));
         b.setGravity(Gravity.CENTER);
-        b.setMinWidth(dp(46));
-        b.setPadding(dp(13), 0, dp(13), 0);
+        b.setMinWidth(dp(40));
+        b.setPadding(dp(11), 0, dp(11), 0);
         cell.addView(b, new FrameLayout.LayoutParams(-2, -1));
         if (key.equals("CTRL")) ctrlKey = b;
         if (key.equals("ALT")) altKey = b;
@@ -396,7 +401,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private View iconKey(int icon, int a11y, String key) {
         FrameLayout cell = new FrameLayout(this);
         cell.setBackground(keyBg(false));
-        cell.addView(Ui.icon(this, icon, t.text, 19), new FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER));
+        cell.addView(Ui.icon(this, icon, t.text, 17), new FrameLayout.LayoutParams(dp(17), dp(17), Gravity.CENTER));
         cell.setContentDescription(getString(a11y));
         bindKey(cell, null, key, null, false);
         return cell;
@@ -547,6 +552,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
         LinearLayout actions = Ui.row(this);
         actions.setPadding(0, dp(8), 0, 0);
+        actions.addView(actionTile(R.drawable.ic_topbar, showTopBar ? R.string.k_hide_bar : R.string.k_show_bar,
+            this::toggleTopBar), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
         p.addView(actions);
@@ -564,6 +571,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         flp.setMargins(dp(2.5f), dp(5), dp(2.5f), 0);
         p.addView(font, flp);
         return p;
+    }
+
+    private void toggleTopBar() {
+        showTopBar = !showTopBar;
+        Prefs.raw(this).edit().putBoolean("top_bar", showTopBar).apply();
+        topBar.setVisibility(showTopBar ? View.VISIBLE : View.GONE);
+        if (showTopBar) refreshTitle();
+        main.post(this::buildKeys); // the strip's session key and the tile's label follow
     }
 
     private TextView sectionLabel(int res) {
@@ -693,6 +708,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             case "⌨": toggleKeyboard(); return;
             case "⋯": setMore(morePanel.getVisibility() != View.VISIBLE); return;
             case "PASTE": onPasteTextFromClipboard(s); return;
+            case "SESSIONS": panel.show(null); return;
             case "⇧TAB": s.write(new byte[]{27, '[', 'Z'}, 0, 3); return;
         }
         if (k.length() == 2 && k.charAt(0) == '^' && k.charAt(1) >= 'A' && k.charAt(1) <= 'Z') {

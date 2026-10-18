@@ -116,6 +116,8 @@
     <string name="k_kill_word">删词</string>
     <string name="k_details">详情</string>
     <string name="k_reconnect">重连</string>
+    <string name="k_show_bar">显示顶栏</string>
+    <string name="k_hide_bar">隐藏顶栏</string>
     <string name="k_settings">设置</string>
     <string name="k_font_size">字号</string>
     <string name="input_hint">输入命令…</string>

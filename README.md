@@ -24,7 +24,7 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 | One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. |
 | Voice input | Tap the mic beside the input box and talk: the text appears in the box as you speak, ready to edit and send, without opening the keyboard. Uses Volcengine (Doubao) streaming speech recognition with your own key. |
 | Images | Send a photo or screenshot to the session (photos, camera, or share from another app). It is copied to the machine and its path typed in, which Claude Code reads as an image. |
-| Phone-first input | Two rows at the bottom: named keys that scroll sideways (Paste, Esc, Tab, Enter, Shift+Tab, arrows, Ctrl, Alt, …), and an input box where you type or dictate a whole line with the normal keyboard, then send it. A sheet holds symbols and Ctrl combos; the keyboard key types straight into the terminal. |
+| Phone-first input | Two rows at the bottom: named keys that scroll sideways (Paste, Esc, Tab, Enter, Shift+Tab, arrows, Ctrl, Alt, …), and an input box where you type or dictate a whole line with the normal keyboard, then send it. A sheet holds symbols and Ctrl combos; the keyboard key types straight into the terminal. The title bar is hidden by default (turn it on in the sheet); the first key opens the session list. |
 | Light and dark | Follows the system, or pick one. |
 | Ghostty look | Catppuccin Mocha / Latte colors, JetBrains Mono with symbol and Nerd Font icons, bar cursor; Chinese glyphs sit centred in two columns. |
 
