@@ -97,6 +97,8 @@ public class TermService extends Service {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    /** Listings run apart from io: one stuck on a dead link (up to 8 s) must not hold up attaching or reconnecting. */
+    private final ExecutorService listIo = Executors.newSingleThreadExecutor();
     private final ClientProxy clientProxy = new ClientProxy();
 
     TerminalSession term;
@@ -198,9 +200,7 @@ public class TermService extends Service {
             connect();
         } else if (state == State.CONNECTED && link != null && link.pathDown()) {
             // The direct path died while we were away: reconnect now instead of probing
-            Diag.i(TAG, "path down after resume");
-            final SshLink l = link;
-            io.execute(l::close);
+            reconnectNow("path down after resume");
         } else if (state == State.CONNECTED && away > 15_000) {
             final SshLink l = link;
             if (screen != null) screen.onProbe(true);
@@ -211,7 +211,7 @@ public class TermService extends Service {
                 Diag.i(TAG, "probe " + (ok ? "ok" : "failed") + " in " + (SystemClock.elapsedRealtime() - p0) + "ms");
                 if (!ok) {
                     Diag.i(TAG, "probe failed after resume");
-                    l.close();
+                    main.post(() -> { if (l == link) reconnectNow("probe failed"); });
                 }
                 main.post(() -> { if (ok && screen != null) screen.onProbe(false); });
             }, "Probe").start();
@@ -235,7 +235,8 @@ public class TermService extends Service {
         final File known = new File(getFilesDir(), "known_hosts");
         final long t0 = SystemClock.elapsedRealtime();
         Diag.i(TAG, "connect start, attempt=" + attempt);
-        io.execute(() -> {
+        // Its own thread: io may still be busy with a call on the old, dead link
+        new Thread(() -> {
             try {
                 byte[] prv = Keys.privateKey(this);
                 byte[] pub = Keys.publicKeyBytes(this);
@@ -258,7 +259,20 @@ public class TermService extends Service {
                 Diag.i(TAG, "connect failed after +" + (SystemClock.elapsedRealtime() - t0) + "ms");
                 main.post(() -> onConnectFailed(e));
             }
-        });
+        }, "Connect").start();
+    }
+
+    /** The link is known to be dead: let it go (closed on the side) and connect again right away. */
+    private void reconnectNow(String why) {
+        Diag.i(TAG, "reconnect now: " + why);
+        final SshLink old = link;
+        link = null;
+        term.setTransport(null);
+        if (old != null) new Thread(old::close, "Close").start();
+        attempt = 0;
+        main.removeCallbacks(reconnect);
+        state = State.IDLE;
+        connect();
     }
 
     private static String sha256(byte[] data) throws java.security.NoSuchAlgorithmException {
@@ -530,11 +544,11 @@ public class TermService extends Service {
 
     void listSessions(Result<Sessions.Listing> cb) {
         final SshLink l = link;
-        if (l == null || !pythonOk) {
-            cb.done(null, l == null ? message : getString(R.string.err_no_python));
+        if (l == null || !pythonOk || l.pathDown()) {
+            cb.done(null, l == null || l.pathDown() ? message : getString(R.string.err_no_python));
             return;
         }
-        io.execute(() -> {
+        listIo.execute(() -> {
             try {
                 Sessions.Listing r = Sessions.parse(l.exec(Sessions.listCommand(), null, 8_000));
                 main.post(() -> cb.done(r, null));
@@ -714,8 +728,7 @@ public class TermService extends Service {
                     }
                     Diag.i(TAG, "default network changed");
                     if (link != null) {
-                        SshLink l = link;
-                        io.execute(l::close); // close() reports the drop, which reconnects
+                        reconnectNow("network changed");
                     } else if (state == State.WAITING) {
                         attempt = 0;
                         main.removeCallbacks(reconnect);
@@ -788,6 +801,7 @@ public class TermService extends Service {
         if (link != null) { SshLink l = link; link = null; io.execute(l::close); }
         term.finish();
         io.shutdown();
+        listIo.shutdown();
         super.onDestroy();
     }
 
