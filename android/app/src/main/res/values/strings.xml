@@ -211,7 +211,6 @@
     <string name="remove">Remove</string>
     <string name="a11y_switch_machine">Switch machine</string>
     <string name="k_image">Image</string>
-    <string name="a11y_voice">Voice input</string>
     <string name="voice_listening">Listening…</string>
     <string name="voice_finishing">Recognizing…</string>
     <string name="voice_setup_title">Set up voice input</string>
@@ -269,6 +268,8 @@
     <string name="t_screen_on">Keep the screen on</string>
     <string name="t_screen_on_sub">While a session is open in Moor</string>
     <string name="a11y_key_strip">Show or hide the key row</string>
-    <string name="hold_send">Release to send</string>
+    <string name="hold_send">Release to send · ↑ cancel · → lock</string>
+    <string name="hold_lock">Release to lock</string>
+    <string name="hold_locked">Listening… tap send to finish</string>
     <string name="hold_cancel">Release to cancel</string>
 </resources>

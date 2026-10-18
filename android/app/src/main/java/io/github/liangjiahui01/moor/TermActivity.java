@@ -58,7 +58,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private int fontSize;
     private boolean ctrlOn, altOn, volCtrl;
     private TextView ctrlKey, altKey;
-    private View moreKey, micKey;
+    private View moreKey;
     private LinearLayout keyArea, morePanel;
     private TextView fontLabel;
     private boolean themeDark;
@@ -349,7 +349,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         String typed = input != null ? input.getText().toString() : "";
         keyArea.removeAllViews();
         ctrlKey = altKey = null;
-        moreKey = micKey = null;
+        moreKey = null;
         morePanel = buildMorePanel();
         morePanel.setVisibility(View.GONE);
         keyArea.addView(morePanel);
@@ -426,7 +426,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         return cell;
     }
 
-    /** The input box with image, voice and send buttons beside it. */
+    /** The input bar: key-row toggle, image, the input box (hold it to talk) and send. */
     private View keyStrip, stripToggle;
 
     /** Shows or folds away the row of keys above the input bar; remembered. */
@@ -448,7 +448,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         LinearLayout bar = Ui.row(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(8), dp(6), dp(8), dp(8));
-        // The mic swells with your voice: let it grow past its slot instead of being cut off
+        // Send swells with your voice while dictating: let it grow past its slot instead of being cut off
         bar.setClipChildren(false);
         bar.setClipToPadding(false);
         stripToggle = roundButton(R.drawable.ic_chevron_down, R.string.a11y_key_strip, false, v -> toggleKeyStrip());
@@ -456,6 +456,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         tlp.rightMargin = dp(6);
         bar.addView(stripToggle, tlp);
         bar.post(this::styleStripToggle);
+        View image = roundButton(R.drawable.ic_image, R.string.k_image, false, v -> showImageSource());
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        ilp.rightMargin = dp(8);
+        bar.addView(image, ilp);
         input = new EditText(this);
         input.setText(typed);
         input.setSelection(typed.length());
@@ -489,10 +493,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         });
         bar.addView(input, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        View image = roundButton(R.drawable.ic_image, R.string.k_image, false, v -> showImageSource());
-        bar.addView(image, roundLp());
-        micKey = roundButton(R.drawable.ic_mic, R.string.a11y_voice, false, v -> toggleVoice());
-        bar.addView(micKey, roundLp());
         sendBtn = roundButton(R.drawable.ic_arrow_up, R.string.input_send, true, v -> sendInput());
         bar.addView(sendBtn, roundLp());
         return bar;
@@ -520,8 +520,11 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     /** Sends the box's text and Enter; with an empty box, just Enter. */
     private void sendInput() {
         if (voice != null) {
-            voice.cancel();
-            endVoice();
+            // Still dictating (locked): let the last words land, then send
+            sendWhenDone = true;
+            input.setHint(R.string.voice_finishing);
+            voice.stop();
+            return;
         }
         String text = input.getText().toString();
         input.setText("");
@@ -781,15 +784,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void refreshToggles() {
         styleToggle(ctrlKey, ctrlOn);
         styleToggle(altKey, altOn);
-        if (micKey != null) {
-            boolean on = voice != null;
-            micKey.setBackground(on ? Ui.round(t.red, dp(22))
-                : t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
-            View icon = ((FrameLayout) micKey).getChildAt(0);
-            if (icon instanceof android.widget.ImageView) {
-                ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
-            }
-        }
         if (moreKey != null) {
             boolean open = morePanel != null && morePanel.getVisibility() == View.VISIBLE;
             moreKey.setBackground(keyBg(open));
@@ -844,34 +838,44 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     // ---- voice input: speech to text without the keyboard ----
 
-    private static final int REQ_MIC = 2, REQ_PICK = 3, REQ_CAMERA = 4, REQ_MIC_HOLD = 5;
+    private static final int REQ_PICK = 3, REQ_CAMERA = 4, REQ_MIC_HOLD = 5;
     private VoiceInput voice;
     /** The box's text when dictation started; the transcript goes after it. */
     private String voiceBase = "";
 
-    /** The mic button: starts dictation into the input box; a second tap stops it. */
-    // ---- hold to talk: press and hold the empty input box, release to send, slide up to cancel ----
+    // ---- hold to talk: press and hold the empty input box, release to send, slide up to cancel,
+    // slide right to lock (keeps listening hands-free; tap send to finish, tap the box to stop and edit) ----
 
-    private boolean holding, holdCancel, sendWhenDone;
-    private float holdY;
+    private boolean holding, holdCancel, holdLock, locked, sendWhenDone;
+    private float holdX, holdY;
     private final Runnable holdStart = this::startHold;
 
     private boolean onInputTouch(View v, MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                if (locked && voice != null) {
+                    // Tap while locked: stop listening, keep the text for editing
+                    input.setHint(R.string.voice_finishing);
+                    voice.stop();
+                    return false;
+                }
                 holding = false;
                 holdCancel = false;
+                holdLock = false;
+                holdX = e.getRawX();
                 holdY = e.getRawY();
                 if (input.getText().length() == 0 && voice == null) main.postDelayed(holdStart, 350);
                 return false;
             case MotionEvent.ACTION_MOVE:
                 if (!holding) {
-                    if (Math.abs(e.getRawY() - holdY) > dp(10)) main.removeCallbacks(holdStart);
+                    if (Math.hypot(e.getRawX() - holdX, e.getRawY() - holdY) > dp(10)) main.removeCallbacks(holdStart);
                     return false;
                 }
                 boolean c = holdY - e.getRawY() > dp(60);
-                if (c != holdCancel) {
+                boolean l = !c && e.getRawX() - holdX > dp(60);
+                if (c != holdCancel || l != holdLock) {
                     holdCancel = c;
+                    holdLock = l;
                     styleHold();
                 }
                 return true;
@@ -880,7 +884,13 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
                 main.removeCallbacks(holdStart);
                 if (!holding) return false;
                 holding = false;
-                endHold(e.getActionMasked() == MotionEvent.ACTION_UP && !holdCancel);
+                boolean up = e.getActionMasked() == MotionEvent.ACTION_UP;
+                if (up && holdLock && voice != null) {
+                    locked = true;
+                    styleHold();
+                } else {
+                    endHold(up && !holdCancel);
+                }
                 return true;
             default:
                 return holding;
@@ -911,14 +921,18 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private void styleHold() {
         if (voice == null) return;
-        input.setHint(holdCancel ? R.string.hold_cancel : R.string.hold_send);
+        int hint = locked ? R.string.hold_locked : holdCancel ? R.string.hold_cancel
+            : holdLock ? R.string.hold_lock : R.string.hold_send;
+        if (holdLock && !locked) input.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        input.setHint(hint);
         input.setBackground(Ui.outline(t.key, holdCancel ? t.red : t.accent, dp(2), dp(22)));
     }
 
     private void endHold(boolean send) {
-        input.setCursorVisible(true);
-        input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
-        if (voice == null) return;
+        if (voice == null) {
+            resetInputLook();
+            return;
+        }
         if (send) {
             sendWhenDone = true;
             input.setHint(R.string.voice_finishing);
@@ -930,21 +944,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         }
     }
 
-    private void toggleVoice() {
-        if (voice != null) {
-            input.setHint(R.string.voice_finishing);
-            voice.stop();
-            return;
-        }
-        if (!VoiceInput.Config.load(this).usable()) {
-            showVoiceSetup();
-            return;
-        }
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC);
-            return;
-        }
-        startVoice();
+    private void resetInputLook() {
+        input.setCursorVisible(true);
+        input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
     }
 
     private void startVoice() {
@@ -958,9 +960,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
             @Override
             public void onLevel(float level) {
-                if (micKey == null) return;
+                if (sendBtn == null) return;
                 float s = 1f + level * 0.18f;
-                micKey.animate().scaleX(s).scaleY(s).setDuration(90).start();
+                sendBtn.animate().scaleX(s).scaleY(s).setDuration(90).start();
             }
 
             @Override
@@ -997,11 +999,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void endVoice() {
         voice = null;
         sendWhenDone = false;
-        if (micKey != null) micKey.animate().cancel();
-        if (micKey != null) {
-            micKey.setScaleX(1f);
-            micKey.setScaleY(1f);
+        locked = false;
+        holdLock = false;
+        if (sendBtn != null) {
+            sendBtn.animate().cancel();
+            sendBtn.setScaleX(1f);
+            sendBtn.setScaleY(1f);
         }
+        resetInputLook();
         input.setHint(R.string.input_hint);
         refreshToggles();
     }
@@ -1028,10 +1033,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] results) {
         super.onRequestPermissionsResult(req, perms, results);
-        if (req != REQ_MIC) return;
-        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-            startVoice();
-        } else {
+        if (req != REQ_MIC_HOLD) return;
+        // Granted: hold the box again to talk
+        if (results.length == 0 || results[0] != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, R.string.voice_no_permission, Toast.LENGTH_LONG).show();
         }
     }
