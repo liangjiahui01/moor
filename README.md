@@ -2,7 +2,7 @@
 
 A terminal for your phone that keeps your sessions on your own machine.
 
-Moor connects to a machine you can SSH into, keeps every session in tmux there, and lets you hop between them from Android. Close the app, lose the network, come back tomorrow: the sessions are still running. When Claude Code needs your input or finishes a task, your phone gets a notification.
+Moor connects to a machine you can SSH into, keeps every session running there, and lets you hop between them from Android. Close the app, lose the network, come back tomorrow: the sessions are still running. When Claude Code needs your input or finishes a task, your phone gets a notification.
 
 [中文说明](README.zh-CN.md)
 
@@ -17,7 +17,7 @@ Moor connects to a machine you can SSH into, keeps every session in tmux there, 
 
 | | |
 |---|---|
-| Persistent sessions | Each session is a tmux session on the host, on its own socket, so it never touches your own tmux setup. Name it when you create it, pick what to run (shell, Claude Code, herdr or any command) and where to start. |
+| Persistent sessions | A small session daemon on the host keeps each session's terminal. When you come back it replays recent output, so you scroll it right on the phone. Name it when you create it, pick what to run (shell, Claude Code, herdr or any command) and where to start. |
 | Session list | Sessions are grouped into "Needs you", "Running" and "Idle", with a live preview of the last lines. |
 | Several machines | Add as many machines as you like and switch between them from the top of the session list. Each one remembers its last session. |
 | Notifications | Claude Code "needs your input" and "finished" (with its last reply), plus an optional terminal bell from any program. |
@@ -29,7 +29,7 @@ Moor connects to a machine you can SSH into, keeps every session in tmux there, 
 ## Requirements
 
 - Android 8.0 or newer.
-- A host you can reach over SSH (Linux or macOS) with `tmux`. `python3` is needed for pairing and notifications.
+- A host you can reach over SSH (Linux or macOS) with `python3`. Nothing else to install: the app copies its helper over when it connects.
 - The phone must be able to reach the host directly: same LAN, VPN, or a public address.
 
 ## Get started
@@ -81,17 +81,17 @@ Tapping a notification opens that session. You don't get notified about the sess
 ```
 phone (Moor)                         host
 ────────────                         ────
-SSH connection ───── attach ───────▶ tmux -L moor  (one tmux session per Moor session)
-               ───── list/create ──▶ tmux commands over exec channels
+SSH connection ───── attach ───────▶ moor attach ──▶ session daemon (owns every session's terminal)
+               ───── list/create ──▶ moor ls / new / kill over exec channels
                ───── moor watch ───▶ ~/.local/state/moor/events.log
                                        ▲            ▲
                                        │            │
-                       Claude Code hooks      tmux bell hook
-                       (moor notify claude)   (moor notify bell)
+                       Claude Code hooks      bell in a session
+                       (moor notify claude)   (daemon)          
 ```
 
 - One SSH connection to the current machine carries the attached terminal plus short exec channels for listing and creating sessions. Notifications come from the current machine.
-- The app installs the helper to `~/.local/share/moor/bin/moor` and its tmux config to `~/.config/moor/tmux.conf` when it connects.
+- The app installs the helper to `~/.local/share/moor/bin/moor` when it connects. The helper starts the session daemon on demand; it keeps the last 256 KB of each session's output and restores terminal modes (alternate screen, mouse, bracketed paste) on attach.
 - Pairing: `moor pair` adds a throwaway key to `authorized_keys` with `expiry-time`, `restrict` and `command=` so it can only run `moor claim`. The QR code carries the host, the host key and the throwaway key's seed. The phone logs in once, hands over its own public key, and the throwaway key is removed. The host key from the QR code is pinned, so there is no trust-on-first-use prompt.
 - The private key is generated on the phone and never leaves it.
 

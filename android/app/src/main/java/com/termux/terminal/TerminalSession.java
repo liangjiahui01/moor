@@ -130,9 +130,19 @@ public final class TerminalSession extends TerminalOutput {
     /** The main thread is writing non-user input (mouse events, terminal replies). */
     public boolean internalWrite;
 
+    /**
+     * The remote is replaying a session's earlier output. Replies the emulator makes to queries in it
+     * (cursor position, device attributes, ...) are stale and must not reach the program. Cleared when
+     * the replay-done marker has been processed.
+     */
+    public volatile boolean replaying;
+    private static final byte[] REPLAY_DONE = "\033]7777;moor-replayed\007".getBytes(StandardCharsets.US_ASCII);
+    private int replayMatch;
+
     @Override
     public void write(byte[] data, int offset, int count) {
         if (mFinished) return;
+        if (internalWrite && replaying) return;
         byte[] prefix = pendingPrefix;
         if (prefix != null && !internalWrite) {
             pendingPrefix = null;
@@ -215,6 +225,21 @@ public final class TerminalSession extends TerminalOutput {
         mClient.onColorsChanged(this);
     }
 
+    /** Index just past the replay-done marker in buf, or -1 (the marker may span reads). */
+    private int replayEnd(byte[] buf, int len) {
+        for (int i = 0; i < len; i++) {
+            if (buf[i] == REPLAY_DONE[replayMatch]) {
+                if (++replayMatch == REPLAY_DONE.length) {
+                    replayMatch = 0;
+                    return i + 1;
+                }
+            } else {
+                replayMatch = buf[i] == REPLAY_DONE[0] ? 1 : 0;
+            }
+        }
+        return -1;
+    }
+
     @SuppressLint("HandlerLeak")
     class MainThreadHandler extends Handler {
         final byte[] mReceiveBuffer = new byte[16 * 1024];
@@ -229,9 +254,19 @@ public final class TerminalSession extends TerminalOutput {
             int bytesRead;
             boolean any = false;
             while ((bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false)) > 0) {
+                int done = replaying ? replayEnd(mReceiveBuffer, bytesRead) : -1;
                 internalWrite = true;
                 try {
-                    mEmulator.append(mReceiveBuffer, bytesRead);
+                    if (done < 0) {
+                        mEmulator.append(mReceiveBuffer, bytesRead);
+                    } else {
+                        mEmulator.append(mReceiveBuffer, done);
+                        replaying = false;
+                        if (done < bytesRead) {
+                            byte[] rest = java.util.Arrays.copyOfRange(mReceiveBuffer, done, bytesRead);
+                            mEmulator.append(rest, rest.length);
+                        }
+                    }
                 } finally {
                     internalWrite = false;
                 }

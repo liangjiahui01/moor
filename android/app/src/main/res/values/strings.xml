@@ -48,7 +48,7 @@
     <string name="err_unreachable">Host unreachable</string>
     <string name="err_failed">Connection failed</string>
     <string name="err_not_connected">Not connected</string>
-    <string name="err_no_tmux">tmux is not installed on the host</string>
+    <string name="err_no_python">python3 is not installed on the host</string>
     <string name="err_list_failed">Could not list sessions: %1$s</string>
     <string name="err_create_failed">Could not create session: %1$s</string>
     <string name="err_rename_failed">Could not rename: %1$s</string>
@@ -81,8 +81,8 @@
     <string name="list_failed">Could not load sessions</string>
     <string name="list_empty">No sessions yet</string>
     <string name="list_empty_body">Sessions keep running on the host after you leave the app.</string>
-    <string name="list_no_tmux">tmux not found</string>
-    <string name="list_no_tmux_body">Moor keeps sessions in tmux. Install it on the host, for example: sudo apt install tmux</string>
+    <string name="list_no_python">python3 not found</string>
+    <string name="list_no_python_body">Moor keeps sessions with a small Python helper. Install python3 on the host, for example: sudo apt install python3</string>
     <string name="note_session_ended">%1$s has ended</string>
     <string name="note_session_ended_plain">The session has ended</string>
     <string name="note_open_failed">Could not open %1$s</string>

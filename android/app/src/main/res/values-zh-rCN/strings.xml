@@ -40,7 +40,7 @@
     <string name="err_unreachable">主机不可达</string>
     <string name="err_failed">连接失败</string>
     <string name="err_not_connected">未连接</string>
-    <string name="err_no_tmux">主机上没有安装 tmux</string>
+    <string name="err_no_python">主机上没有安装 python3</string>
     <string name="err_list_failed">读取会话失败：%1$s</string>
     <string name="err_create_failed">创建会话失败：%1$s</string>
     <string name="err_rename_failed">重命名失败：%1$s</string>
@@ -70,8 +70,8 @@
     <string name="list_failed">读取会话失败</string>
     <string name="list_empty">还没有会话</string>
     <string name="list_empty_body">离开应用后，会话在主机上继续运行。</string>
-    <string name="list_no_tmux">没有找到 tmux</string>
-    <string name="list_no_tmux_body">Moor 用 tmux 保持会话。在主机上安装，例如：sudo apt install tmux</string>
+    <string name="list_no_python">没有找到 python3</string>
+    <string name="list_no_python_body">Moor 用一个 Python 小助手保持会话。在主机上安装 python3，例如：sudo apt install python3</string>
     <string name="note_session_ended">%1$s 已结束</string>
     <string name="note_session_ended_plain">会话已结束</string>
     <string name="note_open_failed">打不开 %1$s</string>

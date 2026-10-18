@@ -44,7 +44,7 @@ public class TermService extends Service {
         /** Probing the connection after coming back to the foreground. */
         void onProbe(boolean probing);
 
-        /** Attached to a session (null name = no tmux on the machine, a plain throwaway shell). */
+        /** Attached to a session (null name = no python3 on the machine, a plain throwaway shell). */
         void onAttached(String name);
 
         /** The user needs to pick a session; note is an optional one-line explanation. */
@@ -102,7 +102,7 @@ public class TermService extends Service {
     private SshLink link;
     /** Attached session; null = on the session list. */
     private String current;
-    private boolean tmuxOk = true, pythonOk = true;
+    private boolean pythonOk = true;
     private State state = State.IDLE;
     private String message = "";
     private int attempt;
@@ -224,17 +224,16 @@ public class TermService extends Service {
                 byte[] prv = Keys.privateKey(this);
                 byte[] pub = Keys.publicKeyBytes(this);
                 SshLink l = SshLink.open(prefs, prv, pub, known, this::onChannelClosed);
-                boolean tmux = false, python = false;
+                boolean python = false;
                 try {
-                    String out = l.exec(Sessions.setupCommand(), Sessions.confBytes(), 8_000);
-                    tmux = out.contains("tmux-ok");
+                    String out = l.exec(Sessions.setupCommand(), null, 8_000);
                     python = out.contains("python-ok");
                     if (python) l.exec(Sessions.installHelperCommand(), helperBytes(), 8_000);
                 } catch (Exception e) {
                     Log.w(TAG, "session setup failed", e);
                 }
-                final boolean t = tmux, py = python;
-                main.post(() -> onConnected(l, prefs, t, py));
+                final boolean py = python;
+                main.post(() -> onConnected(l, prefs, py));
             } catch (Exception e) {
                 main.post(() -> onConnectFailed(e));
             }
@@ -295,16 +294,15 @@ public class TermService extends Service {
         }
     }
 
-    private void onConnected(SshLink l, Prefs prefs, boolean tmux, boolean python) {
-        Log.i(TAG, "connected, tmux=" + tmux + " python=" + python);
+    private void onConnected(SshLink l, Prefs prefs, boolean python) {
+        Log.i(TAG, "connected, python=" + python);
         link = l;
         attempt = 0;
-        tmuxOk = tmux;
         pythonOk = python;
         setState(State.CONNECTED, prefs.user + "@" + prefs.host);
         if (python) startEvents(l);
-        if (!tmux) {
-            // No tmux on the machine: fall back to one throwaway shell
+        if (!python) {
+            // No python3 for the session daemon: fall back to one throwaway shell
             attachCommand(null, "exec \"$SHELL\" -l", prefs.startup.trim());
         } else if (current != null) {
             openSession(current);
@@ -387,7 +385,8 @@ public class TermService extends Service {
 
     // ---- sessions ----
 
-    boolean tmuxAvailable() { return tmuxOk; }
+    /** Persistent sessions need python3 on the machine for the session daemon. */
+    boolean sessionsAvailable() { return pythonOk; }
 
     boolean helperAvailable() { return pythonOk; }
 
@@ -401,9 +400,10 @@ public class TermService extends Service {
         setCurrent(name);
         clearAttention(name);
         io.execute(() -> {
-            // Scroll-back stays in tmux (swipe up shows it); just clear the screen here
+            // The daemon replays the session's recent output; replies the terminal makes to it are stale
             term.setTransport(null);
             feedReset();
+            term.replaying = true;
             attachOnIo(l, name, Sessions.attachCommand(name), null);
         });
     }
@@ -467,8 +467,8 @@ public class TermService extends Service {
 
     void listSessions(Result<Sessions.Listing> cb) {
         final SshLink l = link;
-        if (l == null || !tmuxOk) {
-            cb.done(null, l == null ? message : getString(R.string.err_no_tmux));
+        if (l == null || !pythonOk) {
+            cb.done(null, l == null ? message : getString(R.string.err_no_python));
             return;
         }
         io.execute(() -> {

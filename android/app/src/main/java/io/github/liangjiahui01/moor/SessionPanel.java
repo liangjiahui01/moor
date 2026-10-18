@@ -208,8 +208,8 @@ final class SessionPanel extends FrameLayout {
             placeholder(c.getString(R.string.list_connecting), c.getString(R.string.list_connecting_body), false);
             return;
         }
-        if (!s.tmuxAvailable()) {
-            placeholder(c.getString(R.string.list_no_tmux), c.getString(R.string.list_no_tmux_body), false);
+        if (!s.sessionsAvailable()) {
+            placeholder(c.getString(R.string.list_no_python), c.getString(R.string.list_no_python_body), false);
             return;
         }
         if (last == null) {

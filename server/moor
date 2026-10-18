@@ -4,6 +4,9 @@
     moor pair [--host H] [--port 22] [--cmd CMD] [--name NAME] [--minutes 10]
         Print a one-time QR code and link. Scan it in the Moor app to set up the
         connection and register the phone's SSH key in one step.
+    moor new NAME [--cmd CMD] [--cwd DIR] / ls / attach NAME / kill NAME / rename NAME NEW
+        Terminal sessions that keep running after you disconnect. A small daemon
+        (started on demand) owns them and replays recent output when you attach.
     moor hooks install|uninstall|status
         Add (or remove) Claude Code hooks that send "needs your input" and
         "finished" events to the phone.
@@ -36,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.parse
 
 HOME = pathlib.Path.home()
@@ -183,6 +187,9 @@ def claim(pid):
 
 def where():
     """(session, source) of the program that raised the event."""
+    name = session_name_from_env()
+    if name:
+        return name, "moor"
     tmux = os.environ.get("TMUX", "")
     if tmux and os.path.basename(tmux.split(",")[0]) == "moor":
         r = subprocess.run(["tmux", "display-message", "-p", "#S"], capture_output=True, text=True, timeout=3)
@@ -328,6 +335,721 @@ def hooks(action):
     print("installed" if action == "install" else "uninstalled")
 
 
+# ---------------------------------------------------------------- sessions
+#
+# A small daemon keeps the terminal sessions: it owns each session's pty, keeps the last output so a
+# phone that attaches later gets it replayed (and can scroll it locally), and remembers terminal modes
+# (alternate screen, mouse reporting, ...) so they are restored after the replay. The app talks to it
+# through the commands below over SSH; `moor attach` relays a session through the SSH channel's pty.
+
+STATE = pathlib.Path(os.environ.get("MOOR_STATE", HOME / ".local" / "state" / "moor"))
+SOCK = STATE / "daemon.sock"
+if len(str(SOCK)) > 100:  # AF_UNIX path limit; keep a private short path instead
+    SOCK = pathlib.Path(tempfile.gettempdir()) / f"moor-{os.getuid()}" / "daemon.sock"
+PROTO = 1
+LOG_CAP = 256 * 1024
+SHELL_NAMES = {"zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "nu", "login"}
+TRACKED_MODES = (1, 7, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 2004)
+ALT_MODES = {47, 1047, 1049}
+MODE_RE = re.compile(rb"\x1b\[\?([0-9;]+)([hl])")
+OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+# The app treats terminal replies produced while replaying as stale and drops them until it sees this.
+REPLAY_DONE = b"\x1b]7777;moor-replayed\x07"
+
+
+def _complete_escape(buf, i):
+    """True if the escape sequence starting at buf[i] is complete."""
+    if i + 1 >= len(buf):
+        return False
+    kind = buf[i + 1]
+    if kind == 0x5B:  # CSI
+        return any(0x40 <= b <= 0x7E for b in buf[i + 2:])
+    if kind in (0x5D, 0x50, 0x5E, 0x5F):  # OSC, DCS, PM, APC
+        rest = buf[i + 2:]
+        return b"\x07" in rest or b"\x1b\\" in rest
+    return True
+
+
+class Screen:
+    """Just enough of a terminal to show a session's last lines in the app's list."""
+    TOKENS = re.compile(r"\x1b\[([0-9;?<>=!]*)[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|"
+                        r"\x1b[P^_][^\x1b]*(?:\x1b\\)?|\x1b.?|[\x00-\x1f\x7f]|[^\x00-\x1f\x1b\x7f]+", re.S)
+
+    def __init__(self, cols, rows):
+        self.c, self.r = max(cols, 20), max(rows, 4)
+        self.rows = [[" "] * self.c for _ in range(self.r)]
+        self.x = self.y = 0
+        self.saved = (0, 0)
+
+    def _nl(self):
+        if self.y < self.r - 1:
+            self.y += 1
+        else:
+            self.rows.pop(0)
+            self.rows.append([" "] * self.c)
+
+    def _put(self, ch):
+        w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if self.x + w > self.c:
+            self.x = 0
+            self._nl()
+        self.rows[self.y][self.x] = ch
+        if w == 2 and self.x + 1 < self.c:
+            self.rows[self.y][self.x + 1] = ""
+        self.x += w
+
+    def feed(self, text):
+        for m in self.TOKENS.finditer(text):
+            t = m.group(0)
+            if m.group(2):
+                ps = [int(p) if p.isdigit() else 0 for p in m.group(1).lstrip("?<>=!").split(";")]
+                n = ps[0] or 1
+                f = m.group(2)
+                if f in "Hf":
+                    self.y = min(max((ps[0] or 1) - 1, 0), self.r - 1)
+                    self.x = min(max(((ps[1] if len(ps) > 1 else 0) or 1) - 1, 0), self.c - 1)
+                elif f == "A":
+                    self.y = max(self.y - n, 0)
+                elif f == "B":
+                    self.y = min(self.y + n, self.r - 1)
+                elif f == "C":
+                    self.x = min(self.x + n, self.c - 1)
+                elif f == "D":
+                    self.x = max(self.x - n, 0)
+                elif f == "G":
+                    self.x = min(n - 1, self.c - 1)
+                elif f == "d":
+                    self.y = min(n - 1, self.r - 1)
+                elif f == "J":
+                    if ps[0] == 0:
+                        self.rows[self.y][self.x:] = [" "] * (self.c - self.x)
+                        for r in range(self.y + 1, self.r):
+                            self.rows[r] = [" "] * self.c
+                    elif ps[0] == 1:
+                        for r in range(self.y):
+                            self.rows[r] = [" "] * self.c
+                    else:
+                        self.rows = [[" "] * self.c for _ in range(self.r)]
+                elif f == "K":
+                    row = self.rows[self.y]
+                    if ps[0] == 0:
+                        row[self.x:] = [" "] * (self.c - self.x)
+                    elif ps[0] == 1:
+                        row[:self.x + 1] = [" "] * (self.x + 1)
+                    else:
+                        self.rows[self.y] = [" "] * self.c
+                elif f == "X":
+                    row = self.rows[self.y]
+                    for i in range(self.x, min(self.x + n, self.c)):
+                        row[i] = " "
+                elif f in "hl" and m.group(1).startswith("?") and ALT_MODES & set(ps):
+                    self.rows = [[" "] * self.c for _ in range(self.r)]
+                    self.x = self.y = 0
+            elif t == "\r":
+                self.x = 0
+            elif t == "\n":
+                self._nl()
+            elif t == "\b":
+                self.x = max(self.x - 1, 0)
+            elif t == "\t":
+                self.x = min((self.x // 8 + 1) * 8, self.c - 1)
+            elif t == "\x1b7":
+                self.saved = (self.x, self.y)
+            elif t == "\x1b8":
+                self.x, self.y = self.saved
+            elif t[0] not in "\x1b\x00\x07\x7f" and ord(t[0]) >= 0x20:
+                for ch in t:
+                    self._put(ch)
+
+    def last_lines(self, n=2):
+        lines = ["".join(r).rstrip() for r in self.rows]
+        return [l for l in lines if l.strip()][-n:]
+
+
+class Sess:
+    def __init__(self, sid, name, master, pid, cwd, cols, rows):
+        self.id, self.name, self.master, self.pid, self.cwd = sid, name, master, pid, cwd
+        self.cols, self.rows = cols, rows
+        self.created = self.activity = int(time.time())
+        self.main, self.alt, self.alt_on = bytearray(), bytearray(), False
+        self.modes = {}
+        self.hold = b""
+        self.inbuf = bytearray()
+        self.clients = []
+        self.last_bell = 0
+
+    def record(self, data):
+        self.activity = int(time.time())
+        buf = self.hold + data
+        cut = len(buf)
+        esc = buf.rfind(b"\x1b", max(0, len(buf) - 512))
+        if esc != -1 and not _complete_escape(buf, esc):
+            cut = esc
+        self.hold, buf = buf[cut:], buf[:cut]
+        if len(self.hold) > 4096:
+            buf, self.hold = buf + self.hold, b""
+        pos = 0
+        for m in MODE_RE.finditer(buf):
+            nums = {int(p) for p in m.group(1).split(b";") if p.isdigit()}
+            on = m.group(2) == b"h"
+            if nums & ALT_MODES:
+                (self.alt if self.alt_on else self.main).extend(buf[pos:m.start()])
+                self.alt_on = on
+                self.alt = bytearray()
+                pos = m.end()
+            for n in nums - ALT_MODES:
+                self.modes[n] = on
+        (self.alt if self.alt_on else self.main).extend(buf[pos:])
+        for log in (self.main, self.alt):
+            if len(log) > LOG_CAP:
+                del log[:len(log) - LOG_CAP]
+        if b"\x07" in OSC_RE.sub(b"", buf) and time.time() - self.last_bell > 5:
+            self.last_bell = time.time()
+            try:
+                append_event("bell", self.name, "moor", self.current_cwd(), "")
+            except Exception:
+                pass
+
+    def replay(self):
+        main = bytes(self.main)
+        if len(main) >= LOG_CAP:  # trimmed: start at a line boundary
+            main = main[main.find(b"\n") + 1:]
+        out = bytearray(main)
+        if self.alt_on:
+            out += b"\x1b[?1049h\x1b[H\x1b[2J" + self.alt
+        for n in TRACKED_MODES:
+            if n in self.modes:
+                out += b"\x1b[?%d%s" % (n, b"h" if self.modes[n] else b"l")
+        return bytes(out) + REPLAY_DONE
+
+    def fg_pid(self):
+        try:
+            return os.tcgetpgrp(self.master)
+        except OSError:
+            return self.pid
+
+    def command(self):
+        pid = self.fg_pid()
+        try:
+            return pathlib.Path(f"/proc/{pid}/comm").read_text().strip()
+        except OSError:
+            try:
+                r = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True, timeout=2)
+                return os.path.basename(r.stdout.strip()).lstrip("-")
+            except Exception:
+                return ""
+
+    def current_cwd(self):
+        try:
+            return os.readlink(f"/proc/{self.fg_pid()}/cwd")
+        except OSError:
+            return self.cwd
+
+    def preview(self):
+        s = Screen(self.cols, self.rows)
+        s.feed(bytes((self.alt if self.alt_on else self.main)[-24 * 1024:]).decode("utf-8", "replace"))
+        return s.last_lines()
+
+
+class Daemon:
+    def __init__(self):
+        import selectors
+        self.sel = selectors.DefaultSelector()
+        self.sessions = {}
+        self.next_id = 1
+        self.timers = []
+        self.dead = set()  # pids to reap
+        self.EVENT_READ, self.EVENT_WRITE = selectors.EVENT_READ, selectors.EVENT_WRITE
+
+    # -- plumbing
+
+    def watch(self, fd, data, write=False):
+        ev = self.EVENT_READ | (self.EVENT_WRITE if write else 0)
+        try:
+            self.sel.modify(fd, ev, data)
+        except KeyError:
+            self.sel.register(fd, ev, data)
+
+    def unwatch(self, fd):
+        try:
+            self.sel.unregister(fd)
+        except (KeyError, ValueError):
+            pass
+
+    def send(self, conn, data):
+        conn["out"] += data
+        if len(conn["out"]) > 16 * 1024 * 1024:  # a client that stopped reading
+            self.drop(conn)
+            return
+        self.watch(conn["sock"], ("conn", conn), write=True)
+
+    def drop(self, conn):
+        self.unwatch(conn["sock"])
+        try:
+            conn["sock"].close()
+        except OSError:
+            pass
+        s = conn.get("sess")
+        if s and conn in s.clients:
+            s.clients.remove(conn)
+
+    def winsize(self, s, cols, rows):
+        import struct
+        import termios
+        fcntl.ioctl(s.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+    # -- sessions
+
+    def spawn(self, name, cmd, cwd, cols, rows):
+        import pty
+        import pwd
+        import struct
+        import termios
+        cwd = os.path.expanduser(cwd or "~")
+        if not os.path.isdir(cwd):
+            raise ValueError(f"no such directory: {cwd}")
+        sid = self.next_id
+        self.next_id += 1
+        shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
+        pid, master = pty.fork()
+        if pid == 0:
+            try:
+                import signal
+                for sig in (signal.SIGPIPE, signal.SIGHUP, signal.SIGCHLD, signal.SIGINT):
+                    signal.signal(sig, signal.SIG_DFL)
+                fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                os.chdir(cwd)
+                env = dict(os.environ)
+                for k in ("TMUX", "TMUX_PANE", "MOOR_STATE_DAEMON"):
+                    env.pop(k, None)
+                env.update(TERM="xterm-256color", COLORTERM="truecolor", MOOR_SESSION_ID=str(sid), SHELL=shell)
+                env.setdefault("LANG", "C.UTF-8")
+                os.execvpe(shell, [shell, "-l"], env)
+            finally:
+                os._exit(127)
+        os.set_blocking(master, False)
+        s = Sess(sid, name, master, pid, cwd, cols, rows)
+        self.sessions[name] = s
+        self.watch(master, ("pty", s))
+        if cmd:
+            self.type_into(s, cmd.encode() + b"\r")
+        return s
+
+    def type_into(self, s, data):
+        s.inbuf += data
+        self.watch(s.master, ("pty", s), write=True)
+
+    def end(self, s):
+        self.unwatch(s.master)
+        try:
+            os.close(s.master)
+        except OSError:
+            pass
+        self.dead.add(s.pid)
+        if self.sessions.get(s.name) is s:
+            del self.sessions[s.name]
+        for c in list(s.clients):
+            c["closing"] = True
+            if not c["out"]:
+                self.drop(c)
+
+    def kill(self, s):
+        import signal
+        for sig in (signal.SIGHUP, signal.SIGTERM):
+            try:
+                os.killpg(s.pid, sig)
+            except OSError:
+                pass
+        self.timers.append((time.time() + 2, lambda: self._force_kill(s)))
+        self.end(s)
+
+    def _force_kill(self, s):
+        import signal
+        try:
+            os.killpg(s.pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    def redraw(self, s):
+        """Full-screen programs repaint only on SIGWINCH: shrink by a row, then restore."""
+        if s.rows < 2:
+            return
+        self.winsize(s, s.cols, s.rows - 1)
+        self.timers.append((time.time() + 0.15, lambda: s.name in self.sessions and self.winsize(s, s.cols, s.rows)))
+
+    # -- requests
+
+    def handle(self, conn, req):
+        op = req.get("op")
+        reply = lambda d: self.send(conn, (json.dumps(d) + "\n").encode())
+        if op == "hello":
+            reply({"ok": True, "v": PROTO, "sessions": len(self.sessions)})
+        elif op == "list":
+            items = []
+            for s in self.sessions.values():
+                items.append({"name": s.name, "created": s.created, "activity": s.activity,
+                              "attached": len(s.clients), "command": s.command(), "cwd": s.current_cwd(),
+                              "preview": s.preview()})
+            reply({"ok": True, "now": int(time.time()), "items": items})
+        elif op == "new":
+            name = req.get("name", "")
+            if not name or name in self.sessions:
+                reply({"ok": False, "error": "a session with this name exists" if name else "name required"})
+                return
+            try:
+                self.spawn(name, req.get("cmd", ""), req.get("cwd", ""), int(req.get("cols", 80)), int(req.get("rows", 24)))
+                reply({"ok": True})
+            except Exception as e:
+                reply({"ok": False, "error": str(e)})
+        elif op == "kill":
+            s = self.sessions.get(req.get("name"))
+            if s:
+                self.kill(s)
+            reply({"ok": bool(s), "error": "" if s else "no such session"})
+        elif op == "rename":
+            s, to = self.sessions.get(req.get("name")), req.get("to", "")
+            if not s or not to or to in self.sessions:
+                reply({"ok": False, "error": "no such session" if not s else "a session with this name exists"})
+                return
+            del self.sessions[s.name]
+            s.name = to
+            self.sessions[to] = s
+            reply({"ok": True})
+        elif op == "name":
+            match = [s.name for s in self.sessions.values() if str(s.id) == str(req.get("id"))]
+            reply({"ok": bool(match), "name": match[0] if match else ""})
+        elif op == "quit":
+            reply({"ok": True})
+            if not self.sessions or req.get("force"):
+                self.timers.append((time.time() + 0.2, lambda: sys.exit(0)))
+        elif op == "attach":
+            s = self.sessions.get(req.get("name"))
+            if not s:
+                reply({"ok": False, "error": "no such session"})
+                return
+            reply({"ok": True})
+            conn["sess"] = s
+            s.clients.append(conn)
+            self.send(conn, s.replay())
+            cols, rows = int(req.get("cols", s.cols)), int(req.get("rows", s.rows))
+            if (cols, rows) != (s.cols, s.rows):
+                s.cols, s.rows = cols, rows
+                self.winsize(s, cols, rows)
+            elif s.alt_on or s.command() not in SHELL_NAMES:
+                self.redraw(s)
+        else:
+            reply({"ok": False, "error": "unknown request"})
+
+    def on_conn_input(self, conn, data):
+        conn["in"] += data
+        buf = conn["in"]
+        if "sess" not in conn:
+            nl = buf.find(b"\n")
+            if nl < 0:
+                if len(buf) > 65536:
+                    self.drop(conn)
+                return
+            line, rest = bytes(buf[:nl]), bytes(buf[nl + 1:])
+            conn["in"] = bytearray(rest)
+            try:
+                self.handle(conn, json.loads(line))
+            except ValueError:
+                self.drop(conn)
+                return
+            if "sess" not in conn:
+                conn["closing"] = True  # one request per connection
+                return
+            buf = conn["in"]
+        s = conn["sess"]
+        while len(buf) >= 5:
+            kind, n = buf[0:1], int.from_bytes(buf[1:5], "big")
+            if len(buf) < 5 + n:
+                break
+            payload = bytes(buf[5:5 + n])
+            del buf[:5 + n]
+            if s.name not in self.sessions:
+                continue
+            if kind == b"D":
+                self.type_into(s, payload)
+            elif kind == b"R":
+                try:
+                    size = json.loads(payload)
+                    s.cols, s.rows = max(int(size["cols"]), 2), max(int(size["rows"]), 2)
+                    self.winsize(s, s.cols, s.rows)
+                except (ValueError, KeyError, OSError):
+                    pass
+
+    # -- loop
+
+    def run(self):
+        import signal
+        import socket as sk
+        STATE.mkdir(parents=True, exist_ok=True)
+        lock = open(STATE / "daemon.lock", "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return  # another daemon is running
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+        SOCK.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            SOCK.unlink()
+        except FileNotFoundError:
+            pass
+        old = os.umask(0o077)
+        srv = sk.socket(sk.AF_UNIX, sk.SOCK_STREAM)
+        srv.bind(str(SOCK))
+        os.umask(old)
+        srv.listen(16)
+        srv.setblocking(False)
+        self.sel.register(srv, self.EVENT_READ, ("listen", None))
+        while True:
+            now = time.time()
+            due = [t for t in self.timers if t[0] <= now]
+            self.timers = [t for t in self.timers if t[0] > now]
+            for _, fn in due:
+                try:
+                    fn()
+                except OSError:
+                    pass
+            timeout = min([t[0] for t in self.timers], default=now + 5) - now
+            for key, ev in self.sel.select(max(timeout, 0)):
+                kind, obj = key.data
+                if kind == "listen":
+                    try:
+                        c, _ = srv.accept()
+                        c.setblocking(False)
+                        conn = {"sock": c, "in": bytearray(), "out": bytearray()}
+                        self.watch(c, ("conn", conn))
+                    except OSError:
+                        pass
+                elif kind == "pty":
+                    self.on_pty(obj, ev)
+                else:
+                    self.on_conn(obj, ev)
+            for pid in list(self.dead):
+                try:
+                    if os.waitpid(pid, os.WNOHANG)[0]:
+                        self.dead.discard(pid)
+                except ChildProcessError:
+                    self.dead.discard(pid)
+            for s in list(self.sessions.values()):
+                # The shell exited but something still holds the terminal open: end the session shortly
+                try:
+                    if not getattr(s, "exited", False) and os.waitpid(s.pid, os.WNOHANG)[0]:
+                        s.exited = True
+                        self.timers.append((time.time() + 0.5, lambda s=s: s.name in self.sessions and self.end(s)))
+                except ChildProcessError:
+                    pass
+
+    def on_pty(self, s, ev):
+        if ev & self.EVENT_READ:
+            try:
+                data = os.read(s.master, 65536)
+            except BlockingIOError:
+                data = None
+            except OSError:
+                data = b""
+            if data == b"":
+                self.end(s)
+                return
+            if data:
+                s.record(data)
+                for c in list(s.clients):
+                    self.send(c, data)
+        if ev & self.EVENT_WRITE and s.inbuf:
+            try:
+                n = os.write(s.master, s.inbuf)
+                del s.inbuf[:n]
+            except BlockingIOError:
+                pass
+            except OSError:
+                s.inbuf.clear()
+            if not s.inbuf and s.name in self.sessions:
+                self.watch(s.master, ("pty", s))
+
+    def on_conn(self, conn, ev):
+        sock = conn["sock"]
+        if ev & self.EVENT_READ:
+            try:
+                data = sock.recv(65536)
+            except BlockingIOError:
+                data = None
+            except OSError:
+                data = b""
+            if data == b"":
+                self.drop(conn)
+                return
+            if data:
+                self.on_conn_input(conn, data)
+        if ev & self.EVENT_WRITE and conn["out"]:
+            try:
+                n = sock.send(conn["out"])
+                del conn["out"][:n]
+            except BlockingIOError:
+                pass
+            except OSError:
+                self.drop(conn)
+                return
+        if not conn["out"]:
+            if conn.get("closing"):
+                self.drop(conn)
+            elif sock.fileno() != -1:
+                self.watch(sock, ("conn", conn))
+
+
+def daemon_conn(start=True):
+    """A connection to the session daemon, starting it if needed (and replacing an idle one of another version)."""
+    import socket as sk
+
+    def connect():
+        c = sk.socket(sk.AF_UNIX, sk.SOCK_STREAM)
+        c.connect(str(SOCK))
+        return c
+
+    def start_daemon():
+        STATE.mkdir(parents=True, exist_ok=True)
+        with open(STATE / "daemon.log", "ab") as log:
+            subprocess.Popen([sys.executable, str(pathlib.Path(__file__).resolve()), "daemon"], stdin=subprocess.DEVNULL,
+                             stdout=log, stderr=log, start_new_session=True, close_fds=True, cwd=str(HOME))
+        for _ in range(60):
+            time.sleep(0.05)
+            try:
+                return connect()
+            except OSError:
+                pass
+        raise SystemExit("moor: session daemon did not start")
+
+    try:
+        c = connect()
+    except OSError:
+        if not start:
+            return None
+        return start_daemon()
+    hello = request_on(c, {"op": "hello"})
+    if hello.get("v") != PROTO and not hello.get("sessions"):
+        try:
+            request_on(connect(), {"op": "quit"})
+        except OSError:
+            pass
+        time.sleep(0.4)
+        return start_daemon()
+    return connect()
+
+
+def request_on(c, req):
+    c.sendall((json.dumps(req) + "\n").encode())
+    buf = b""
+    while b"\n" not in buf:
+        chunk = c.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+    c.close()
+    try:
+        return json.loads(buf.split(b"\n", 1)[0] or b"{}")
+    except ValueError:
+        return {}
+
+
+def request(req):
+    return request_on(daemon_conn(), req)
+
+
+def cmd_ls():
+    r = request({"op": "list"})
+    home = str(HOME)
+    print(f"NOW\t{r.get('now', int(time.time()))}\t{home}\t{os.path.realpath(home)}")
+    for i in r.get("items", []):
+        clean = lambda v: str(v).replace("\t", " ").replace("\n", " ")
+        preview = "\x1f".join(clean(l) for l in i.get("preview", []))
+        print("\t".join(["S", clean(i["name"]), str(i["created"]), str(i["activity"]), str(i["attached"]),
+                         clean(i.get("command", "")), clean(i.get("cwd", "")), preview]))
+
+
+def cmd_simple(req):
+    r = request(req)
+    if not r.get("ok"):
+        print("moor: " + (r.get("error") or "failed"), file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_attach(name):
+    import select
+    import signal
+    import termios
+    import tty
+    c = daemon_conn()
+    try:
+        cols, rows = os.get_terminal_size(0)
+    except OSError:
+        cols, rows = 80, 24
+    c.sendall((json.dumps({"op": "attach", "name": name, "cols": cols, "rows": rows}) + "\n").encode())
+    buf = b""
+    while b"\n" not in buf:
+        chunk = c.recv(65536)
+        if not chunk:
+            sys.exit("moor: session daemon closed the connection")
+        buf += chunk
+    line, rest = buf.split(b"\n", 1)
+    r = json.loads(line)
+    if not r.get("ok"):
+        print("moor: " + r.get("error", "attach failed"), file=sys.stderr)
+        sys.exit(3)
+    frame = lambda kind, data: kind + len(data).to_bytes(4, "big") + data
+    wake_r, wake_w = os.pipe()
+    signal.signal(signal.SIGWINCH, lambda *_: os.write(wake_w, b"w"))
+    saved = termios.tcgetattr(0) if os.isatty(0) else None
+    if saved:
+        tty.setraw(0)
+    try:
+        if rest:
+            write_all(1, rest)
+        while True:
+            ready, _, _ = select.select([0, c, wake_r], [], [])
+            if wake_r in ready:
+                os.read(wake_r, 64)
+                try:
+                    cols, rows = os.get_terminal_size(0)
+                    c.sendall(frame(b"R", json.dumps({"cols": cols, "rows": rows}).encode()))
+                except OSError:
+                    pass
+            if c in ready:
+                data = c.recv(65536)
+                if not data:
+                    break
+                write_all(1, data)
+            if 0 in ready:
+                data = os.read(0, 65536)
+                if not data:
+                    break
+                c.sendall(frame(b"D", data))
+    except OSError:
+        pass
+    finally:
+        if saved:
+            termios.tcsetattr(0, termios.TCSADRAIN, saved)
+
+
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        view = view[n:]
+
+
+def session_name_from_env():
+    sid = os.environ.get("MOOR_SESSION_ID")
+    if not sid:
+        return ""
+    try:
+        c = daemon_conn(start=False)
+        return request_on(c, {"op": "name", "id": sid}).get("name", "") if c else ""
+    except OSError:
+        return ""
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -346,6 +1068,25 @@ def main():
             pass
     elif a[:1] == ["hooks"] and len(a) == 2 and a[1] in ("install", "uninstall", "status"):
         hooks(a[1])
+    elif a[:1] == ["daemon"]:
+        Daemon().run()
+    elif a[:1] == ["ls"]:
+        cmd_ls()
+    elif a[:1] == ["attach"] and len(a) == 2:
+        cmd_attach(a[1])
+    elif a[:1] == ["kill"] and len(a) == 2:
+        cmd_simple({"op": "kill", "name": a[1]})
+    elif a[:1] == ["rename"] and len(a) == 3:
+        cmd_simple({"op": "rename", "name": a[1], "to": a[2]})
+    elif a[:1] == ["new"]:
+        ap = argparse.ArgumentParser(prog="moor new", description="Start a session")
+        ap.add_argument("name")
+        ap.add_argument("--cmd", default="", help="typed into the session's login shell")
+        ap.add_argument("--cwd", default="~")
+        ap.add_argument("--cols", type=int, default=80)
+        ap.add_argument("--rows", type=int, default=24)
+        n = ap.parse_args(a[1:])
+        cmd_simple({"op": "new", "name": n.name, "cmd": n.cmd, "cwd": n.cwd, "cols": n.cols, "rows": n.rows})
     elif a[:1] == ["pair"]:
         ap = argparse.ArgumentParser(prog="moor pair", description="Print a one-time pairing QR code for the Moor app")
         ap.add_argument("--host", default=default_host(), help="address the phone uses to reach this machine (default: first IPv4)")

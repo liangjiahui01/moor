@@ -131,10 +131,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         termBox.setBackgroundColor(t.terminalBg());
         termBox.setPadding(dp(6), dp(2), dp(4), 0);
         termBox.addView(view, new FrameLayout.LayoutParams(-1, -1));
-        // In a tmux session, swiping up enters scroll-back; make the next input leave it first
-        view.onWheelUp = () -> {
-            if (service != null && service.currentSession() != null) service.term.pendingPrefix = Sessions.LEAVE_SCROLL;
-        };
 
         status = Ui.text(this, "", 12, t.onAccent, Ui.MEDIUM);
         status.setPadding(dp(10), dp(5), dp(10), dp(5));
@@ -290,7 +286,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (service == null || title == null) return;
         String cur = service.currentSession();
         title.setText(cur != null ? cur : getString(R.string.app_name));
-        if (service.state() != TermService.State.CONNECTED || !service.tmuxAvailable()) {
+        if (service.state() != TermService.State.CONNECTED || !service.sessionsAvailable()) {
             subtitle.setText(service.stateMessage());
             countLabel.setText("");
             return;
