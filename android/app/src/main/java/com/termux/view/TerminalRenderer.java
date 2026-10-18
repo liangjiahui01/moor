@@ -20,6 +20,10 @@ public final class TerminalRenderer {
 
     final int mTextSize;
     final Typeface mTypeface;
+    /** Real bold face; null falls back to fake bold. */
+    final Typeface mBoldTypeface;
+    /** Extra row height over the font's own line spacing, as in Ghostty's adjust-cell-height. */
+    static final float CELL_HEIGHT_EXTRA = 0.12f;
     private final Paint mTextPaint = new Paint();
 
     /** The width of a single mono spaced character obtained by {@link Paint#measureText(String)} on a single 'X'. */
@@ -33,9 +37,10 @@ public final class TerminalRenderer {
 
     private final float[] asciiMeasures = new float[127];
 
-    public TerminalRenderer(int textSize, Typeface typeface) {
+    public TerminalRenderer(int textSize, Typeface typeface, Typeface boldTypeface) {
         mTextSize = textSize;
         mTypeface = typeface;
+        mBoldTypeface = boldTypeface;
 
         mTextPaint.setTypeface(typeface);
         mTextPaint.setAntiAlias(true);
@@ -43,8 +48,11 @@ public final class TerminalRenderer {
         mTextPaint.setSubpixelText(true);
         mTextPaint.setTextSize(textSize);
 
-        mFontLineSpacing = (int) Math.ceil(mTextPaint.getFontSpacing());
-        mFontAscent = (int) Math.ceil(mTextPaint.ascent());
+        int spacing = (int) Math.ceil(mTextPaint.getFontSpacing());
+        int extra = Math.round(spacing * CELL_HEIGHT_EXTRA);
+        mFontLineSpacing = spacing + extra;
+        // Half the extra space above the glyphs, half below
+        mFontAscent = (int) Math.ceil(mTextPaint.ascent()) - extra / 2;
         mFontLineSpacingAndAscent = mFontLineSpacing + mFontAscent;
         mFontWidth = mTextPaint.measureText("X");
 
@@ -166,13 +174,11 @@ public final class TerminalRenderer {
         int backColor = TextStyle.decodeBackColor(textStyle);
         final boolean bold = (effect & (TextStyle.CHARACTER_ATTRIBUTE_BOLD | TextStyle.CHARACTER_ATTRIBUTE_BLINK)) != 0;
         final boolean underline = (effect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) != 0;
-        final boolean italic = (effect & TextStyle.CHARACTER_ATTRIBUTE_ITALIC) != 0;
         final boolean strikeThrough = (effect & TextStyle.CHARACTER_ATTRIBUTE_STRIKETHROUGH) != 0;
         final boolean dim = (effect & TextStyle.CHARACTER_ATTRIBUTE_DIM) != 0;
 
         if ((foreColor & 0xff000000) != 0xff000000) {
-            // Let bold have bright colors if applicable (one of the first 8):
-            if (bold && foreColor >= 0 && foreColor < 8) foreColor += 8;
+            // Bold is not bright (Ghostty's default)
             foreColor = palette[foreColor];
         }
 
@@ -193,7 +199,11 @@ public final class TerminalRenderer {
 
         mes = mes / mFontWidth;
         boolean savedMatrix = false;
-        if (Math.abs(mes - runWidthColumns) > 0.01) {
+        float textShift = 0;
+        if (mes < runWidthColumns - 0.01 && mes > runWidthColumns / 2f) {
+            // A narrower glyph from a fallback font (CJK is 1 em, two cells are 1.2 em): centre it, don't stretch it
+            textShift = (runWidthColumns - mes) * mFontWidth / 2;
+        } else if (Math.abs(mes - runWidthColumns) > 0.01) {
             canvas.save();
             canvas.scale(runWidthColumns / mes, 1.f);
             left *= mes / runWidthColumns;
@@ -211,7 +221,7 @@ public final class TerminalRenderer {
             mTextPaint.setColor(cursor);
             float cursorHeight = mFontLineSpacingAndAscent - mFontAscent;
             if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_UNDERLINE) cursorHeight /= 4.;
-            else if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR) right -= ((right - left) * 3) / 4.;
+            else if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR) right = left + Math.max(2f, mFontWidth / 5);
             canvas.drawRect(left, y - cursorHeight, right, y, mTextPaint);
         }
 
@@ -220,22 +230,23 @@ public final class TerminalRenderer {
                 int red = (0xFF & (foreColor >> 16));
                 int green = (0xFF & (foreColor >> 8));
                 int blue = (0xFF & foreColor);
-                // Dim color handling used by libvte which in turn took it from xterm
-                // (https://bug735245.bugzilla-attachments.gnome.org/attachment.cgi?id=284267):
-                red = red * 2 / 3;
-                green = green * 2 / 3;
-                blue = blue * 2 / 3;
+                // Faint text at 80% over the background (Ghostty's faint-opacity)
+                int bg = reverseVideoHere ? palette[TextStyle.COLOR_INDEX_FOREGROUND] : palette[TextStyle.COLOR_INDEX_BACKGROUND];
+                red = (red * 4 + (0xFF & (bg >> 16))) / 5;
+                green = (green * 4 + (0xFF & (bg >> 8))) / 5;
+                blue = (blue * 4 + (0xFF & bg)) / 5;
                 foreColor = 0xFF000000 + (red << 16) + (green << 8) + blue;
             }
 
-            mTextPaint.setFakeBoldText(bold);
+            mTextPaint.setTypeface(bold && mBoldTypeface != null ? mBoldTypeface : mTypeface);
+            mTextPaint.setFakeBoldText(bold && mBoldTypeface == null);
             mTextPaint.setUnderlineText(underline);
-            mTextPaint.setTextSkewX(italic ? -0.35f : 0.f);
+            // Italic stays upright, as in Ghostty with font-style-italic = false: slanted CJK reads poorly
             mTextPaint.setStrikeThruText(strikeThrough);
             mTextPaint.setColor(foreColor);
 
             // The text alignment is the default Paint.Align.LEFT.
-            canvas.drawTextRun(text, startCharIndex, runWidthChars, startCharIndex, runWidthChars, left, y - mFontLineSpacingAndAscent, false, mTextPaint);
+            canvas.drawTextRun(text, startCharIndex, runWidthChars, startCharIndex, runWidthChars, left + textShift, y - mFontLineSpacingAndAscent, false, mTextPaint);
         }
 
         if (savedMatrix) canvas.restore();

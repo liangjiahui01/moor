@@ -26,7 +26,7 @@ final class Ui {
 
     static final int REGULAR = 0, MEDIUM = 1, SEMIBOLD = 2;
     private static Typeface[] faces;
-    private static Typeface mono;
+    private static Typeface mono, monoBold;
 
     static Typeface face(Context c, int weight) {
         if (faces == null) {
@@ -43,16 +43,27 @@ final class Ui {
         return faces[weight];
     }
 
-    /** Terminal font: Sarasa Term SC keeps CJK exactly two cells wide. */
+    /** Terminal font: JetBrains Mono, as in Ghostty; CJK falls back to the system font, centred in two cells. */
     static Typeface mono(Context c) {
         if (mono == null) {
             try {
-                mono = Typeface.createFromAsset(c.getAssets(), "fonts/SarasaTermSC-Regular.ttf");
+                mono = Typeface.createFromAsset(c.getAssets(), "term-fonts/JetBrainsMono-Regular.ttf");
             } catch (RuntimeException e) {
                 mono = Typeface.MONOSPACE;
             }
         }
         return mono;
+    }
+
+    static Typeface monoBold(Context c) {
+        if (monoBold == null) {
+            try {
+                monoBold = Typeface.createFromAsset(c.getAssets(), "term-fonts/JetBrainsMono-Bold.ttf");
+            } catch (RuntimeException e) {
+                monoBold = Typeface.create(mono(c), Typeface.BOLD);
+            }
+        }
+        return monoBold;
     }
 
     static int dp(Context c, float v) {

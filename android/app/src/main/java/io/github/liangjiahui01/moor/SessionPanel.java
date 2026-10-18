@@ -161,7 +161,7 @@ final class SessionPanel extends FrameLayout {
     }
 
     void onState(TermService.State state, String message) {
-        int color = state == TermService.State.CONNECTED ? t.accent : state == TermService.State.FAILED ? t.red : t.amber;
+        int color = state == TermService.State.CONNECTED ? t.ok : state == TermService.State.FAILED ? t.red : t.amber;
         connDot.setBackground(Ui.round(color, dp(4)));
         String label = Prefs.load(getContext()).label(getContext());
         connText.setText(state == TermService.State.CONNECTED || message == null || message.isEmpty()
@@ -305,8 +305,8 @@ final class SessionPanel extends FrameLayout {
             if (busy) {
                 LinearLayout.LayoutParams dl = Ui.lp(dp(6), dp(6));
                 dl.leftMargin = dp(8);
-                r2.addView(Ui.dot(c, t.accent, 6), dl);
-                TextView st = Ui.text(c, c.getString(R.string.status_output), 12.5f, t.accent, Ui.MEDIUM);
+                r2.addView(Ui.dot(c, t.ok, 6), dl);
+                TextView st = Ui.text(c, c.getString(R.string.status_output), 12.5f, t.ok, Ui.MEDIUM);
                 st.setPadding(dp(6), 0, 0, 0);
                 r2.addView(st);
             }
@@ -445,7 +445,7 @@ final class SessionPanel extends FrameLayout {
             LinearLayout r = Ui.row(c);
             r.setPadding(dp(14), dp(10), dp(12), dp(10));
             r.setMinimumHeight(dp(62));
-            int dot = !isCur ? t.line : s != null && s.state() == TermService.State.CONNECTED ? t.accent
+            int dot = !isCur ? t.line : s != null && s.state() == TermService.State.CONNECTED ? t.ok
                 : s != null && s.state() == TermService.State.FAILED ? t.red : t.amber;
             r.addView(Ui.dot(c, dot, 9));
             LinearLayout labels = Ui.column(c);

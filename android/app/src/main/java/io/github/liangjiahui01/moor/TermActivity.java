@@ -160,7 +160,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             getResources().getDisplayMetrics()));
         // setTextSize first: setTypeface needs the renderer it creates
         view.setTextSize(fontSize);
-        view.setTypeface(Ui.mono(this));
+        view.setTypeface(Ui.mono(this), Ui.monoBold(this));
 
         if (Build.VERSION.SDK_INT >= 33
             && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
@@ -261,7 +261,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         title = Ui.oneLine(Ui.text(this, "", 14.5f, t.text, Ui.SEMIBOLD), TextUtils.TruncateAt.END);
         title.setMaxWidth(dp(150));
         bar.addView(title, Ui.lp(-2, -2));
-        titleDot = Ui.dot(this, t.accent, 6);
+        titleDot = Ui.dot(this, t.ok, 6);
         LinearLayout.LayoutParams dlp = Ui.lp(dp(6), dp(6));
         dlp.setMargins(dp(6), 0, dp(8), 0);
         bar.addView(titleDot, dlp);
@@ -301,7 +301,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
                 if (i.name.equals(service.currentSession())) {
                     subtitle.setText((i.command.isEmpty() ? "shell" : i.command) + " · " + i.path);
                     long idle = Math.max(0, r.now - i.activity);
-                    titleDot.setBackground(Ui.round(idle < 15 ? t.accent : t.faint, dp(3)));
+                    titleDot.setBackground(Ui.round(idle < 15 ? t.ok : t.faint, dp(3)));
                 }
             }
         });
@@ -353,9 +353,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (voiceBar.getParent() != null) ((android.view.ViewGroup) voiceBar.getParent()).removeView(voiceBar);
         keyArea.addView(voiceBar);
         LinearLayout row = Ui.row(this);
-        row.setPadding(dp(6), dp(4), dp(6), dp(5));
+        row.setPadding(dp(6), dp(3), dp(6), dp(3));
         for (String k : wide ? WIDE : MAIN) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(34), 1f);
             lp.setMargins(dp(2.5f), 0, dp(2.5f), 0);
             row.addView(keyCell(k, false), lp);
         }
@@ -385,7 +385,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         String up = UP.get(k);
         if (up != null) {
             TextView hint = Ui.text(this, up.equals("⇧TAB") ? "⇧" : up, 8, t.faint, Ui.REGULAR);
-            hint.setPadding(0, dp(3), dp(4), 0);
+            hint.setPadding(0, dp(2), dp(4), 0);
             cell.addView(hint, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END));
         }
         if (k.equals("CTRL")) ctrlKey = b;
@@ -995,7 +995,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void showStatus(String s, int color) {
         status.setText(s);
         status.setBackground(Ui.round(color, dp(12)));
-        status.setTextColor(t.dark ? 0xff0b0d10 : 0xffffffff);
+        status.setTextColor(t.dark ? 0xff11111b : 0xffffffff);
         status.setVisibility(View.VISIBLE);
     }
 
@@ -1007,7 +1007,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         main.removeCallbacks(hideStatus);
         if (state == TermService.State.CONNECTED) {
             if (prev != null && prev != TermService.State.CONNECTED) {
-                showStatus(getString(R.string.state_connected), t.accent);
+                showStatus(getString(R.string.state_connected), t.ok);
                 main.postDelayed(hideStatus, 1200);
             } else {
                 status.setVisibility(View.GONE);

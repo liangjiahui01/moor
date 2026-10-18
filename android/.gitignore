@@ -2,7 +2,6 @@
 build/
 app/build/
 local.properties
-app/src/main/assets/fonts/
 *.apk
 defaults.properties
 keystore.properties

@@ -453,7 +453,7 @@ public class SettingsActivity extends Activity {
         sw.addView(knob, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER_VERTICAL));
         final boolean[] state = {on};
         Runnable paint = () -> {
-            sw.setBackground(Ui.round(state[0] ? t.accent : (t.dark ? 0xff2c313a : 0xffd5d8dd), dp(14)));
+            sw.setBackground(Ui.round(state[0] ? t.accent : (t.dark ? 0xff45475a : 0xffccd0da), dp(14)));
             knob.setBackground(Ui.round(state[0] ? t.onAccent : (t.dark ? t.faint : 0xffffffff), dp(11)));
             ((FrameLayout.LayoutParams) knob.getLayoutParams()).gravity = Gravity.CENTER_VERTICAL | (state[0] ? Gravity.END : Gravity.START);
             knob.requestLayout();

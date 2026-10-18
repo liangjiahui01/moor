@@ -496,12 +496,18 @@ public final class TerminalView extends View {
      * @param textSize the new font size, in density-independent pixels.
      */
     public void setTextSize(int textSize) {
-        mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface);
+        mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface,
+            mRenderer == null ? null : mRenderer.mBoldTypeface);
         updateSize();
     }
 
     public void setTypeface(Typeface newTypeface) {
-        mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface);
+        setTypeface(newTypeface, null);
+    }
+
+    /** Sets the regular face and a real bold face (null: fake bold). */
+    public void setTypeface(Typeface newTypeface, Typeface boldTypeface) {
+        mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface, boldTypeface);
         updateSize();
         invalidate();
     }

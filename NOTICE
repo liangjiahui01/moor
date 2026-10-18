@@ -17,5 +17,7 @@ It includes or bundles the following third-party work:
 - AndroidX Core and Annotation, Apache License 2.0.
 - Geist font (https://github.com/vercel/geist-font), SIL Open Font License 1.1.
   Bundled in android/app/src/main/assets/ui-fonts/ with its license file.
-- Sarasa Gothic / Sarasa Term SC (https://github.com/be5invis/Sarasa-Gothic),
-  SIL Open Font License 1.1. Downloaded at build time by android/scripts/fetch-font.sh.
+- OkHttp (https://github.com/square/okhttp), Apache License 2.0.
+- JetBrains Mono (https://github.com/JetBrains/JetBrainsMono), SIL Open Font License 1.1.
+  Bundled in android/app/src/main/assets/term-fonts/ with its license file.
+- Catppuccin color palettes (https://github.com/catppuccin/catppuccin), MIT License.

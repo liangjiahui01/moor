@@ -25,11 +25,6 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Fetch terminal font
-        run: |
-          sudo apt-get install -y p7zip-full >/dev/null
-          ./scripts/fetch-font.sh
-
       - name: Signing key
         if: startsWith(github.ref, 'refs/tags/')
         env:

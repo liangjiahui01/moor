@@ -26,7 +26,7 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 | 图片 | 把照片或截图发进会话（相册、拍照，或从别的 App 分享）。图片传到主机，路径填进输入，Claude Code 会当作图片读取。 |
 | 为手机设计的按键 | 一行按键，按键上滑出第二功能；面板里有符号、Ctrl 组合、粘贴和适合语音输入的输入框。 |
 | 浅色和深色 | 跟随系统，或手动选。 |
-| 中文对齐 | 用更纱 Term SC，中文正好占两格。 |
+| Ghostty 外观 | Catppuccin Mocha / Latte 配色、JetBrains Mono 字体、竖线光标；中文在两格里居中。 |
 
 ## 要求
 
@@ -103,7 +103,6 @@ SSH 连接 ─────── 接入 ─────────────�
 
 ```sh
 cd android
-./scripts/fetch-font.sh          # 下载更纱 Term SC（需要 7z）
 ./gradlew assembleDebug
 ```
 

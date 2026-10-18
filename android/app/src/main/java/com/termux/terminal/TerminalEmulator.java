@@ -154,7 +154,7 @@ public final class TerminalEmulator {
     public static final int TERMINAL_CURSOR_STYLE_BLOCK = 0;
     public static final int TERMINAL_CURSOR_STYLE_UNDERLINE = 1;
     public static final int TERMINAL_CURSOR_STYLE_BAR = 2;
-    public static final int DEFAULT_TERMINAL_CURSOR_STYLE = TERMINAL_CURSOR_STYLE_BLOCK;
+    public static final int DEFAULT_TERMINAL_CURSOR_STYLE = TERMINAL_CURSOR_STYLE_BAR; // Ghostty-style bar
     public static final Integer[] TERMINAL_CURSOR_STYLES_LIST = new Integer[]{TERMINAL_CURSOR_STYLE_BLOCK, TERMINAL_CURSOR_STYLE_UNDERLINE, TERMINAL_CURSOR_STYLE_BAR};
 
     /** The terminal cursor styles. */
@@ -870,7 +870,9 @@ public final class TerminalEmulator {
                         switch (b) {
                             case 'q': // "${CSI}${STYLE} q" - set cursor style (http://www.vt100.net/docs/vt510-rm/DECSCUSR).
                                 switch (arg) {
-                                    case 0: // Blinking block.
+                                    case 0: // Default.
+                                        mCursorStyle = DEFAULT_TERMINAL_CURSOR_STYLE;
+                                        break;
                                     case 1: // Blinking block.
                                     case 2: // Steady block.
                                         mCursorStyle = TERMINAL_CURSOR_STYLE_BLOCK;
