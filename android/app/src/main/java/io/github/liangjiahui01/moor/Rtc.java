@@ -60,7 +60,7 @@ final class Rtc {
                 try (BufferedReader r = new BufferedReader(new InputStreamReader(err, StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = r.readLine()) != null) {
-                        Log.i(TAG, line);
+                        Diag.i(TAG, line);
                         if (line.contains("route direct")) route = "direct";
                         else if (line.contains("route relay")) route = "relay";
                         else if (line.endsWith("ice disconnected") || line.endsWith("ice failed")) pathDown = true;

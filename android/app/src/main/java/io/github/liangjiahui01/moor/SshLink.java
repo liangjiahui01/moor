@@ -120,7 +120,7 @@ final class SshLink implements TerminalSession.Transport {
                     reason = REASON_ENDED;
                 } catch (IOException e) {
                     reason = REASON_NETWORK;
-                    android.util.Log.i("SshLink", "read ended: " + e);
+                    Diag.i("SshLink", "read ended: " + e);
                 }
                 if (closed || !session.isConnected()) {
                     close(); // reports the dropped connection
@@ -155,7 +155,7 @@ final class SshLink implements TerminalSession.Transport {
                     String line;
                     while ((line = r.readLine()) != null) handler.onLine(line);
                 } catch (Exception e) {
-                    android.util.Log.i("SshLink", "stream ended: " + e);
+                    Diag.i("SshLink", "stream ended: " + e);
                 } finally {
                     if (ch != null) ch.disconnect();
                 }

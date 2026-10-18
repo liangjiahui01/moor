@@ -24,6 +24,7 @@ import com.termux.terminal.TerminalSessionClient;
 import java.io.File;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -127,6 +128,8 @@ public class TermService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        Diag.init(this);
+        Diag.i(TAG, "service start");
         term = new TerminalSession(5000, clientProxy);
         current = Prefs.load(this).session;
         machineId = Prefs.currentId(this);
@@ -161,6 +164,7 @@ public class TermService extends Service {
         screen = null;
         clientProxy.target = null;
         backgroundSince = SystemClock.elapsedRealtime();
+        Diag.i(TAG, "background, state=" + state);
         main.removeCallbacks(idleDisconnect);
         // With notifications on, stay connected in the background so events keep arriving
         if (!Prefs.load(this).anyNotifications()) main.postDelayed(idleDisconnect, IDLE_DISCONNECT_MS);
@@ -172,7 +176,7 @@ public class TermService extends Service {
     private static final long IDLE_DISCONNECT_MS = 10 * 60_000L;
     private final Runnable idleDisconnect = () -> {
         if (screen != null) return;
-        Log.i(TAG, "idle in background, disconnecting");
+        Diag.i(TAG, "idle in background, disconnecting");
         main.removeCallbacks(reconnect);
         dropLink();
         attempt = 0;
@@ -183,6 +187,8 @@ public class TermService extends Service {
     void onScreenResumed() {
         long away = backgroundSince == 0 ? 0 : SystemClock.elapsedRealtime() - backgroundSince;
         backgroundSince = 0;
+        Diag.i(TAG, "resume after " + away / 1000 + "s, state=" + state
+            + (link != null ? ", pathDown=" + link.pathDown() : ""));
         if (state == State.FAILED && away > 0) {
             // e.g. back from adding the public key elsewhere: try again right away
             retryNow();
@@ -192,7 +198,7 @@ public class TermService extends Service {
             connect();
         } else if (state == State.CONNECTED && link != null && link.pathDown()) {
             // The direct path died while we were away: reconnect now instead of probing
-            Log.i(TAG, "path down after resume");
+            Diag.i(TAG, "path down after resume");
             final SshLink l = link;
             io.execute(l::close);
         } else if (state == State.CONNECTED && away > 15_000) {
@@ -200,9 +206,11 @@ public class TermService extends Service {
             if (screen != null) screen.onProbe(true);
             // Own thread: a probe hanging on a dead link must not hold up the reconnect behind it
             new Thread(() -> {
+                long p0 = SystemClock.elapsedRealtime();
                 boolean ok = l.probe();
+                Diag.i(TAG, "probe " + (ok ? "ok" : "failed") + " in " + (SystemClock.elapsedRealtime() - p0) + "ms");
                 if (!ok) {
-                    Log.i(TAG, "probe failed after resume");
+                    Diag.i(TAG, "probe failed after resume");
                     l.close();
                 }
                 main.post(() -> { if (ok && screen != null) screen.onProbe(false); });
@@ -225,11 +233,14 @@ public class TermService extends Service {
         setState(State.CONNECTING, attempt == 0 ? getString(R.string.state_connecting)
             : getString(R.string.state_reconnecting, attempt));
         final File known = new File(getFilesDir(), "known_hosts");
+        final long t0 = SystemClock.elapsedRealtime();
+        Diag.i(TAG, "connect start, attempt=" + attempt);
         io.execute(() -> {
             try {
                 byte[] prv = Keys.privateKey(this);
                 byte[] pub = Keys.publicKeyBytes(this);
                 SshLink l = SshLink.open(this, prefs, prv, pub, known, this::onChannelClosed);
+                Diag.i(TAG, "ssh up (" + l.route() + ") +" + (SystemClock.elapsedRealtime() - t0) + "ms");
                 boolean python = false;
                 try {
                     // One round trip in the usual case: the helper is only sent when it changed
@@ -238,11 +249,13 @@ public class TermService extends Service {
                     python = out.contains("python-ok");
                     if (python && !out.contains("helper-ok")) l.exec(Sessions.installHelperCommand(), helper, 8_000);
                 } catch (Exception e) {
-                    Log.w(TAG, "session setup failed", e);
+                    Diag.w(TAG, "session setup failed", e);
                 }
                 final boolean py = python;
+                Diag.i(TAG, "setup done +" + (SystemClock.elapsedRealtime() - t0) + "ms");
                 main.post(() -> onConnected(l, prefs, py));
             } catch (Exception e) {
+                Diag.i(TAG, "connect failed after +" + (SystemClock.elapsedRealtime() - t0) + "ms");
                 main.post(() -> onConnectFailed(e));
             }
         });
@@ -309,7 +322,7 @@ public class TermService extends Service {
     }
 
     private void onConnected(SshLink l, Prefs prefs, boolean python) {
-        Log.i(TAG, "connected, python=" + python);
+        Diag.i(TAG, "connected, python=" + python);
         link = l;
         attempt = 0;
         pythonOk = python;
@@ -317,6 +330,8 @@ public class TermService extends Service {
             : l.route().equals("relay") ? " · " + getString(R.string.route_relay) : "";
         setState(State.CONNECTED, prefs.user + "@" + prefs.host + route);
         if (python) startEvents(l);
+        // Copy the connection log to the machine a moment later, once the session is attached
+        main.postDelayed(() -> uploadDiag(l), 4_000);
         if (!python) {
             // No python3 for the session daemon: fall back to one throwaway shell
             attachCommand(null, "exec \"$SHELL\" -l", prefs.startup.trim());
@@ -328,9 +343,26 @@ public class TermService extends Service {
         }
     }
 
+    private void uploadDiag(SshLink l) {
+        if (l != link || l.isClosed()) return;
+        io.execute(() -> {
+            List<String> lines = Diag.take();
+            if (lines.isEmpty()) return;
+            String model = (Build.MANUFACTURER + "-" + Build.MODEL).replaceAll("[^A-Za-z0-9_.-]", "_");
+            String f = "~/.cache/moor/device-" + model + ".log";
+            try {
+                // Append, and keep the file to the last 2 MB
+                l.exec("mkdir -p ~/.cache/moor && f=" + f + " && cat >> $f && if [ $(wc -c < $f) -gt 4000000 ]; "
+                    + "then tail -c 2000000 $f > $f.t && mv $f.t $f; fi", Diag.join(lines), 8_000);
+            } catch (Exception e) {
+                Diag.restore(lines);
+            }
+        });
+    }
+
     private void onConnectFailed(Exception e) {
         String msg = describe(e);
-        Log.w(TAG, "connect failed: " + e);
+        Diag.w(TAG, "connect failed: " + e);
         if (e instanceof JSchException && String.valueOf(e.getMessage()).contains("Auth")) {
             // Key not authorized yet: retrying won't help until the user fixes it
             setState(State.FAILED, getString(R.string.state_auth_rejected));
@@ -344,7 +376,7 @@ public class TermService extends Service {
     }
 
     private void onChannelClosed(SshLink l, com.jcraft.jsch.Channel ch, boolean alive, String reason) {
-        Log.i(TAG, "channel closed: " + reason + " alive=" + alive);
+        Diag.i(TAG, "channel closed: " + reason + " alive=" + alive);
         main.post(() -> {
             if (l != link) return;
             if (!alive) {
@@ -457,6 +489,7 @@ public class TermService extends Service {
     private void attachOnIo(SshLink l, String name, String command, String startup) {
         try {
             l.attach(term, command);
+            Diag.i(TAG, "attached " + name);
             main.post(() -> {
                 if (l != link) return;
                 term.setTransport(l);
@@ -469,7 +502,7 @@ public class TermService extends Service {
                 if (screen != null) screen.onAttached(name);
             });
         } catch (Exception e) {
-            Log.w(TAG, "attach failed", e);
+            Diag.w(TAG, "attach failed", e);
             if (!l.isClosed() && l.probe()) {
                 main.post(() -> {
                     setCurrent(null);
@@ -669,6 +702,7 @@ public class TermService extends Service {
                 main.post(() -> {
                     Network prev = currentNet;
                     currentNet = network;
+                    Diag.i(TAG, "network " + network + (prev == null ? "" : " (was " + prev + ")") + ", state=" + state);
                     if (idleInBackground()) return;
                     if (prev == null || prev.equals(network)) {
                         if (state == State.WAITING) {
@@ -678,7 +712,7 @@ public class TermService extends Service {
                         }
                         return;
                     }
-                    Log.i(TAG, "default network changed");
+                    Diag.i(TAG, "default network changed");
                     if (link != null) {
                         SshLink l = link;
                         io.execute(l::close); // close() reports the drop, which reconnects
