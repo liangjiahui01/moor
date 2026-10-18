@@ -540,6 +540,9 @@ public class TermService extends Service {
         });
     }
 
+    /** When a Claude notification was last shown, by notification id. */
+    private final java.util.Map<Integer, Long> richShown = new java.util.HashMap<>();
+
     private void onEvent(Event e) {
         if (e.ts <= Prefs.lastEvent(this)) return;
         Prefs.saveLastEvent(this, e.ts);
@@ -570,6 +573,14 @@ public class TermService extends Service {
         Intent open = new Intent(this, TermActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         if (mine) open.putExtra(EXTRA_SESSION, e.session);
         int id = 100 + (e.source + "/" + label).hashCode() % 100_000;
+        // One notification per session: a bell right after a Claude notification would replace the more useful one
+        long now = SystemClock.elapsedRealtime();
+        if (e.kind.equals("bell")) {
+            Long rich = richShown.get(id);
+            if (rich != null && now - rich < 30_000) return;
+        } else {
+            richShown.put(id, now);
+        }
         PendingIntent pi = PendingIntent.getActivity(this, id, open,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n = new Notification.Builder(this, CHANNEL_EVENTS)
