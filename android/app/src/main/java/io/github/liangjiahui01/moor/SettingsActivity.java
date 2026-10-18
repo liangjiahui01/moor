@@ -184,7 +184,8 @@ public class SettingsActivity extends Activity {
         section(R.string.sec_voice);
         VoiceInput.Config vc = VoiceInput.Config.load(this);
         LinearLayout voice = card();
-        int secret = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+        // A masked password field: keyboards switch to plain Latin input and keep no history
+        int secret = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
         voice.addView(valueRow(R.string.v_api_key, vc.apiKey.isEmpty() ? getString(R.string.not_set) : mask(vc.apiKey), true,
             () -> editField(R.string.v_api_key, "voice_api_key", vc.apiKey, secret)));
         voice.addView(divider());
@@ -275,6 +276,9 @@ public class SettingsActivity extends Activity {
         box.addView(title);
         EditText e = NewSessionSheet.field(this, t, value, null);
         e.setInputType(type);
+        if ((type & InputType.TYPE_MASK_VARIATION) == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            e.setImeOptions(e.getImeOptions() | android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+        }
         e.selectAll();
         box.addView(e, Ui.lp(-1, dp(50)));
         Dialog d = Ui.bottomSheet(this, t, box);

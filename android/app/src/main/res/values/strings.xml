@@ -230,7 +230,7 @@
     <string name="image_failed">Couldn\'t send the image: %1$s</string>
     <string name="image_need_session">Open a session first</string>
     <string name="image_pending">Open a session to send the image</string>
-    <string name="sec_voice">Voice input</string>
+    <string name="sec_voice">VOICE INPUT</string>
     <string name="v_api_key">API Key</string>
     <string name="v_app_id">App ID</string>
     <string name="v_access_token">Access Token</string>
