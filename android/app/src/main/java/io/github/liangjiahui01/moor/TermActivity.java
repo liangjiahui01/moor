@@ -1067,7 +1067,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private FrameLayout bubble;
     private TextView bubblePreview;
     private float bubbleX0, bubbleY0;
-    private final Runnable bubbleHoldStart = this::startBubbleHold;
 
     private void buildBubble() {
         bubble = new FrameLayout(this);
@@ -1082,6 +1081,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         bubblePreview.setLineSpacing(dp(3), 1f);
         bubblePreview.setElevation(dp(6));
         bubblePreview.setVisibility(View.GONE);
+        bubblePreview.setOnClickListener(v -> cancelBubbleVoice());
         termBox.addView(bubblePreview, new FrameLayout.LayoutParams(-2, -2));
         // Keep its spot (as a share of the free space) through rotation and the keyboard opening
         termBox.addOnLayoutChangeListener((v, l, tp, r, b, ol, ot, or, ob) -> {
@@ -1175,64 +1175,49 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         bubblePreview.setY(above >= m ? above : bubble.getY() + dp(56) + gap);
     }
 
+    private boolean bubbleLongDone;
+    private final Runnable bubbleLongPress = () -> {
+        bubbleLongDone = true;
+        bubble.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        showBubbleMenu();
+    };
+
+    // Tap to start talking, tap again to send; the card beside it cancels. Long press: the menu. Press and move: drag.
     private boolean onBubbleTouch(View v, MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 bubbleDrag = false;
-                holding = false;
-                holdCancel = false;
-                holdLock = false;
+                bubbleLongDone = false;
                 holdX = e.getRawX();
                 holdY = e.getRawY();
                 bubbleX0 = bubble.getX();
                 bubbleY0 = bubble.getY();
-                if (voice == null) main.postDelayed(bubbleHoldStart, 350);
+                if (voice == null) main.postDelayed(bubbleLongPress, 450);
                 return true;
             case MotionEvent.ACTION_MOVE: {
                 float dx = e.getRawX() - holdX, dy = e.getRawY() - holdY;
-                if (holding) {
-                    boolean c = -dy > dp(60);
-                    boolean l = !c && dx > dp(60);
-                    if (c != holdCancel || l != holdLock) {
-                        holdCancel = c;
-                        holdLock = l;
-                        styleHold();
-                    }
-                    return true;
-                }
-                if (voice != null) return true;
+                if (bubbleLongDone) return true;
                 if (!bubbleDrag && Math.hypot(dx, dy) > dp(8)) {
                     bubbleDrag = true;
-                    main.removeCallbacks(bubbleHoldStart);
+                    main.removeCallbacks(bubbleLongPress);
                 }
                 if (bubbleDrag) moveBubble(bubbleX0 + dx, bubbleY0 + dy);
                 return true;
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
-                main.removeCallbacks(bubbleHoldStart);
-                boolean up = e.getActionMasked() == MotionEvent.ACTION_UP;
+                main.removeCallbacks(bubbleLongPress);
                 if (bubbleDrag) {
                     bubbleDrag = false;
                     saveBubble();
                     return true;
                 }
-                if (holding) {
-                    holding = false;
-                    if (up && holdLock && voice != null) {
-                        locked = true;
-                        styleHold();
-                    } else {
-                        endHold(up && !holdCancel);
-                    }
-                    return true;
-                }
-                if (!up) return true;
-                if (voice != null) {
-                    if (locked) sendInput(); // locked: a tap finishes and sends
-                } else {
-                    bubble.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-                    showBubbleMenu();
+                if (bubbleLongDone || e.getActionMasked() != MotionEvent.ACTION_UP) return true;
+                bubble.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                if (voice == null) {
+                    startBubbleVoice();
+                } else if (locked) {
+                    sendInput(); // the last words land, then it sends
                 }
                 return true;
             }
@@ -1241,7 +1226,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         }
     }
 
-    private void startBubbleHold() {
+    private void startBubbleVoice() {
         if (!VoiceInput.Config.load(this).usable()) {
             showVoiceSetup();
             return;
@@ -1250,11 +1235,19 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC_HOLD);
             return;
         }
-        holding = true;
         input.setText(""); // the box is hidden here: send only what is said now
-        bubble.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        holding = false;
+        holdCancel = false;
         startVoice();
+        locked = true;
         styleHold();
+    }
+
+    private void cancelBubbleVoice() {
+        if (voice == null) return;
+        voice.cancel();
+        endVoice();
+        input.setText("");
     }
 
     /** The bubble's menu: keyboard, image, sessions, a few keys, and the way back to the bars. */

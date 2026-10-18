@@ -250,7 +250,7 @@
     <string name="update_later">以后再说</string>
     <string name="k_minimal">极简模式</string>
     <string name="k_exit_minimal">退出极简</string>
-    <string name="a11y_bubble">按住说话，拖动移位，点按打开菜单</string>
+    <string name="a11y_bubble">点按说话，拖动移位，长按打开菜单</string>
     <string name="k_redraw">刷新画面</string>
     <string name="t_screen_on">会话中保持亮屏</string>
     <string name="t_screen_on_sub">在 Moor 里打开会话时屏幕不自动熄灭</string>
@@ -258,6 +258,6 @@
     <string name="hold_send">松手发送，↑取消 →锁定</string>
     <string name="hold_lock">松手锁定</string>
     <string name="hold_locked">正在听，点发送结束</string>
-    <string name="hold_locked_bubble">正在听，点圆圈结束</string>
+    <string name="hold_locked_bubble">正在听：点圆圈发送，点这里取消</string>
     <string name="hold_cancel">松手取消</string>
 </resources>
