@@ -10,8 +10,8 @@ android {
         applicationId "io.github.liangjiahui01.moor"
         minSdk 26
         targetSdk 34
-        versionCode 14
-        versionName "0.8.1"
+        versionCode 15
+        versionName "0.9.0"
 
         // Optional prefill for the settings screen, from defaults.properties (not in git):
         //   host=my-box.example.com
