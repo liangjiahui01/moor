@@ -180,6 +180,28 @@ public class SettingsActivity extends Activity {
         term.addView(toggleRow(R.string.t_ime, R.string.t_ime_sub, p.imeCompat, "ime_compat"));
         page.addView(term);
 
+        // ---- voice input ----
+        section(R.string.sec_voice);
+        VoiceInput.Config vc = VoiceInput.Config.load(this);
+        LinearLayout voice = card();
+        int secret = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+        voice.addView(valueRow(R.string.v_api_key, vc.apiKey.isEmpty() ? getString(R.string.not_set) : mask(vc.apiKey), true,
+            () -> editField(R.string.v_api_key, "voice_api_key", vc.apiKey, secret)));
+        voice.addView(divider());
+        voice.addView(valueRow(R.string.v_app_id, vc.appId.isEmpty() ? getString(R.string.not_set) : vc.appId, true,
+            () -> editField(R.string.v_app_id, "voice_app_id", vc.appId, secret)));
+        voice.addView(divider());
+        voice.addView(valueRow(R.string.v_access_token, vc.accessToken.isEmpty() ? getString(R.string.not_set) : mask(vc.accessToken), true,
+            () -> editField(R.string.v_access_token, "voice_access_token", vc.accessToken, secret)));
+        voice.addView(divider());
+        boolean v1 = vc.model.equals(VoiceInput.MODEL_1);
+        voice.addView(valueRow(R.string.v_model, getString(v1 ? R.string.v_model_1 : R.string.v_model_2), true, () -> {
+            Prefs.put(this, "voice_model", v1 ? VoiceInput.MODEL_2 : VoiceInput.MODEL_1);
+            rebuild();
+        }));
+        page.addView(voice);
+        page.addView(hint(getString(R.string.v_hint)));
+
         // ---- keys ----
         section(R.string.sec_keys);
         LinearLayout keys = card();
@@ -270,7 +292,7 @@ public class SettingsActivity extends Activity {
                 Prefs.put(this, key, s);
             }
             d.dismiss();
-            if (!key.equals("startup") && !key.equals("name")) reconnect();
+            if (!key.equals("startup") && !key.equals("name") && !key.startsWith("voice_")) reconnect();
             rebuild();
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(52));
@@ -358,6 +380,10 @@ public class SettingsActivity extends Activity {
         lp.leftMargin = dp(10);
         buttons.addView(go, lp);
         d.show();
+    }
+
+    private static String mask(String s) {
+        return s.length() <= 8 ? "••••" : s.substring(0, 4) + "…" + s.substring(s.length() - 4);
     }
 
     private void copy(String text, int toast) {

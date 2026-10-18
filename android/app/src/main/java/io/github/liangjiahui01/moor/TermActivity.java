@@ -9,6 +9,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.provider.MediaStore;
+import android.widget.Toast;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -61,7 +64,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private int fontSize;
     private boolean ctrlOn, altOn, volCtrl;
     private TextView ctrlKey, altKey;
-    private View moreKey;
+    private View moreKey, micKey;
     private LinearLayout keyArea, morePanel;
     private TextView fontLabel;
     private boolean themeDark;
@@ -188,6 +191,15 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     /** A notification tap carries the session to open. */
     private void handleOpenIntent(Intent intent) {
         if (intent == null || service == null) return;
+        if (Intent.ACTION_SEND.equals(intent.getAction())) {
+            Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            intent.setAction(null);
+            if (u != null) {
+                pendingImage = u;
+                sendPendingImage();
+            }
+            return;
+        }
         String s = intent.getStringExtra(TermService.EXTRA_SESSION);
         if (s == null) return;
         intent.removeExtra(TermService.EXTRA_SESSION);
@@ -220,6 +232,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     @Override
     protected void onPause() {
+        cancelVoice();
         if (service != null) service.detachScreen();
         super.onPause();
     }
@@ -316,9 +329,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     // Portrait: one row of common keys; swipe up on a key for the small label in its corner;
     // the last key opens a sheet with symbols, Ctrl combos and actions. Wide screens get more keys in the row.
 
-    private static final String[] MAIN = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "⌨", "⋯"};
+    private static final String[] MAIN = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "🎤", "⌨", "⋯"};
     private static final String[] WIDE = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→",
-        "HOME", "END", "PGUP", "PGDN", "/", "-", "|", "~", "⌨", "⋯"};
+        "HOME", "END", "PGUP", "PGDN", "/", "-", "|", "~", "🎤", "⌨", "⋯"};
     private static final String[][] SYMBOLS = {
         {"/", "-", "_", "|", "~", "`", "=", "\\", "$", "&"},
         {"'", "\"", "<", ">", "(", ")", "[", "]", "{", "}"},
@@ -341,11 +354,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void buildKeys() {
         keyArea.removeAllViews();
         ctrlKey = altKey = null;
-        moreKey = null;
+        moreKey = micKey = null;
         boolean wide = getResources().getConfiguration().screenWidthDp >= 600;
         morePanel = buildMorePanel();
         morePanel.setVisibility(View.GONE);
         keyArea.addView(morePanel);
+        if (voiceBar == null) buildVoiceBar();
+        if (voiceBar.getParent() != null) ((android.view.ViewGroup) voiceBar.getParent()).removeView(voiceBar);
+        keyArea.addView(voiceBar);
         LinearLayout row = Ui.row(this);
         row.setPadding(dp(6), dp(4), dp(6), dp(5));
         for (String k : wide ? WIDE : MAIN) {
@@ -361,12 +377,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         FrameLayout cell = new FrameLayout(this);
         cell.setBackground(Ui.round(t.key, dp(10)));
         if (!t.dark) cell.setBackground(Ui.outline(t.key, t.line, dp(1), dp(10)));
-        if (k.equals("⌨") || k.equals("⋯")) {
-            int res = k.equals("⌨") ? R.drawable.ic_keyboard : R.drawable.ic_more;
+        if (k.equals("⌨") || k.equals("⋯") || k.equals("🎤")) {
+            int res = k.equals("⌨") ? R.drawable.ic_keyboard : k.equals("🎤") ? R.drawable.ic_mic : R.drawable.ic_more;
             android.widget.ImageView i = Ui.icon(this, res, t.text, 18);
             cell.addView(i, new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER));
-            cell.setContentDescription(getString(k.equals("⌨") ? R.string.a11y_keyboard : R.string.a11y_more_keys));
+            cell.setContentDescription(getString(k.equals("⌨") ? R.string.a11y_keyboard
+                : k.equals("🎤") ? R.string.a11y_voice : R.string.a11y_more_keys));
             if (k.equals("⋯")) moreKey = cell;
+            if (k.equals("🎤")) micKey = cell;
             bindKey(cell, null, k, null, inPanel);
             return cell;
         }
@@ -443,6 +461,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         actions.setPadding(0, dp(8), 0, 0);
         actions.addView(actionTile(R.drawable.ic_paste, R.string.k_paste, () -> onPasteTextFromClipboard(service.term)), tileLp());
         actions.addView(actionTile(R.drawable.ic_input, R.string.k_input, this::showInputBox), tileLp());
+        actions.addView(actionTile(R.drawable.ic_image, R.string.k_image, this::showImageSource), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
         actions.addView(actionTile(fullscreen ? R.drawable.ic_fullscreen_exit : R.drawable.ic_fullscreen,
             fullscreen ? R.string.k_fullscreen_exit : R.string.k_fullscreen, this::toggleFullscreen), tileLp());
@@ -515,10 +534,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         c.setBackground(Ui.pressable(t, t.dark ? Ui.round(t.key, dp(12)) : Ui.outline(t.key, t.line, dp(1), dp(12)), dp(12)));
         c.addView(Ui.icon(this, icon, t.text, 19));
         TextView l = Ui.text(this, getString(label), 11.5f, t.text, Ui.REGULAR);
-        l.setPadding(dp(4), dp(5), dp(4), 0);
+        l.setPadding(dp(3), dp(5), dp(3), 0);
         l.setGravity(Gravity.CENTER);
-        Ui.oneLine(l, TextUtils.TruncateAt.END);
-        c.addView(l);
+        l.setMaxLines(1);
+        // Six tiles in a row: longer labels (English) shrink to fit rather than being cut off
+        l.setAutoSizeTextTypeUniformWithConfiguration(8, 11, 1, TypedValue.COMPLEX_UNIT_SP);
+        c.addView(l, new LinearLayout.LayoutParams(-1, dp(22)));
         c.setOnClickListener(v -> {
             if (service == null) return;
             setMore(false);
@@ -621,6 +642,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             case "ALT": altOn = !altOn; refreshToggles(); return;
             case "⌨": toggleKeyboard(); return;
             case "⋯": setMore(morePanel.getVisibility() != View.VISIBLE); return;
+            case "🎤": toggleVoice(); return;
             case "⇧TAB": s.write(new byte[]{27, '[', 'Z'}, 0, 3); return;
         }
         if (k.length() == 2 && k.charAt(0) == '^' && k.charAt(1) >= 'A' && k.charAt(1) <= 'Z') {
@@ -656,6 +678,15 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void refreshToggles() {
         styleToggle(ctrlKey, ctrlOn);
         styleToggle(altKey, altOn);
+        if (micKey != null) {
+            boolean on = voice != null;
+            micKey.setBackground(on ? Ui.round(t.accent, dp(10))
+                : t.dark ? Ui.round(t.key, dp(10)) : Ui.outline(t.key, t.line, dp(1), dp(10)));
+            View icon = ((FrameLayout) micKey).getChildAt(0);
+            if (icon instanceof android.widget.ImageView) {
+                ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
+            }
+        }
         if (moreKey != null) {
             boolean open = morePanel != null && morePanel.getVisibility() == View.VISIBLE;
             moreKey.setBackground(open ? Ui.round(t.accent, dp(10))
@@ -757,6 +788,240 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         }
     }
 
+    // ---- voice input: speech to text without the keyboard ----
+
+    private static final int REQ_MIC = 2, REQ_PICK = 3, REQ_CAMERA = 4;
+    private VoiceInput voice;
+    /** What happens to the transcript when recognition ends: 0 drop, 1 insert, 2 insert and press Enter. */
+    private int voiceMode;
+    private LinearLayout voiceBar;
+    private TextView voiceText;
+    private View voiceDot;
+
+    private void buildVoiceBar() {
+        voiceBar = Ui.row(this);
+        voiceBar.setGravity(Gravity.CENTER_VERTICAL);
+        voiceBar.setPadding(dp(14), dp(10), dp(8), dp(4));
+        voiceBar.setVisibility(View.GONE);
+        voiceDot = new View(this);
+        voiceDot.setBackground(Ui.round(t.red, dp(6)));
+        voiceBar.addView(voiceDot, Ui.lp(dp(11), dp(11)));
+        voiceText = Ui.text(this, "", 15, t.text, Ui.REGULAR);
+        voiceText.setHintTextColor(t.faint);
+        voiceText.setMaxLines(4);
+        voiceText.setEllipsize(TextUtils.TruncateAt.START);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, -2, 1f);
+        tlp.setMargins(dp(10), 0, dp(8), 0);
+        voiceBar.addView(voiceText, tlp);
+        TextView cancel = smallButton("✕", this::cancelVoice);
+        cancel.setContentDescription(getString(R.string.cancel));
+        voiceBar.addView(cancel, Ui.lp(dp(38), dp(36)));
+        TextView insert = Ui.secondaryButton(this, t, getString(R.string.voice_insert), v -> finishVoice(1));
+        LinearLayout.LayoutParams ilp = Ui.lp(-2, dp(36));
+        ilp.leftMargin = dp(6);
+        voiceBar.addView(insert, ilp);
+        TextView send = Ui.primaryButton(this, t, getString(R.string.voice_send), v -> finishVoice(2));
+        send.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams slp = Ui.lp(-2, dp(36));
+        slp.leftMargin = dp(6);
+        voiceBar.addView(send, slp);
+    }
+
+    private void toggleVoice() {
+        if (voice != null) {
+            finishVoice(1);
+            return;
+        }
+        if (!VoiceInput.Config.load(this).usable()) {
+            showVoiceSetup();
+            return;
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            return;
+        }
+        startVoice();
+    }
+
+    private void startVoice() {
+        voiceMode = 0;
+        voiceText.setText("");
+        voiceText.setHint(R.string.voice_listening);
+        voiceBar.setVisibility(View.VISIBLE);
+        voice = new VoiceInput(this, new VoiceInput.Listener() {
+            @Override
+            public void onText(String text) {
+                voiceText.setText(text);
+            }
+
+            @Override
+            public void onLevel(float level) {
+                float s = 1f + level * 0.9f;
+                voiceDot.animate().scaleX(s).scaleY(s).setDuration(90).start();
+            }
+
+            @Override
+            public void onDone(String text) {
+                int mode = voiceMode;
+                endVoice();
+                if (mode != 0 && !text.trim().isEmpty()) sendText(text.trim(), mode == 2);
+            }
+
+            @Override
+            public void onError(String message) {
+                endVoice();
+                Toast.makeText(TermActivity.this, getString(R.string.voice_failed, message), Toast.LENGTH_LONG).show();
+            }
+        });
+        voice.start();
+        refreshToggles();
+    }
+
+    /** Stops listening; the transcript is inserted (mode 1) or inserted and sent (mode 2) once it is final. */
+    private void finishVoice(int mode) {
+        if (voice == null) return;
+        voiceMode = mode;
+        voiceText.setHint(R.string.voice_finishing);
+        voice.stop();
+    }
+
+    private void cancelVoice() {
+        if (voice == null) return;
+        voice.cancel();
+        endVoice();
+    }
+
+    private void endVoice() {
+        voice = null;
+        voiceDot.animate().cancel();
+        voiceBar.setVisibility(View.GONE);
+        refreshToggles();
+    }
+
+    private void showVoiceSetup() {
+        LinearLayout box = Ui.column(this);
+        TextView title = Ui.text(this, getString(R.string.voice_setup_title), 20, t.text, Ui.SEMIBOLD);
+        title.setPadding(0, 0, 0, dp(10));
+        box.addView(title);
+        TextView body = Ui.text(this, getString(R.string.voice_setup_body), 14, t.sub, Ui.REGULAR);
+        body.setLineSpacing(dp(4), 1f);
+        box.addView(body);
+        Dialog d = Ui.bottomSheet(this, t, box);
+        TextView go = Ui.primaryButton(this, t, getString(R.string.voice_open_settings), v -> {
+            d.dismiss();
+            openSettings();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(50));
+        lp.topMargin = dp(18);
+        box.addView(go, lp);
+        d.show();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int req, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(req, perms, results);
+        if (req != REQ_MIC) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            startVoice();
+        } else {
+            Toast.makeText(this, R.string.voice_no_permission, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ---- images: copied to the machine, the path typed into the session ----
+
+    private Uri pendingImage, cameraUri;
+
+    private void showImageSource() {
+        if (service == null || service.currentSession() == null) {
+            Toast.makeText(this, R.string.image_need_session, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout box = Ui.column(this);
+        TextView title = Ui.text(this, getString(R.string.image_title), 20, t.text, Ui.SEMIBOLD);
+        title.setPadding(0, 0, 0, dp(8));
+        box.addView(title);
+        TextView body = Ui.text(this, getString(R.string.image_hint), 13, t.sub, Ui.REGULAR);
+        body.setLineSpacing(dp(3), 1f);
+        body.setPadding(0, 0, 0, dp(16));
+        box.addView(body);
+        LinearLayout row = Ui.row(this);
+        Dialog d = Ui.bottomSheet(this, t, box);
+        View gallery = actionTile(R.drawable.ic_image, R.string.image_gallery, () -> {
+            d.dismiss();
+            pickImage();
+        });
+        View camera = actionTile(R.drawable.ic_camera, R.string.image_camera, () -> {
+            d.dismiss();
+            takePhoto();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(76), 1f);
+        lp.setMargins(0, 0, dp(5), 0);
+        row.addView(gallery, lp);
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(76), 1f);
+        lp2.setMargins(dp(5), 0, 0, 0);
+        row.addView(camera, lp2);
+        box.addView(row);
+        d.show();
+    }
+
+    private void pickImage() {
+        Intent i = Build.VERSION.SDK_INT >= 33 ? new Intent(MediaStore.ACTION_PICK_IMAGES)
+            : new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(i, REQ_PICK);
+        } catch (Exception e) {
+            Toast.makeText(this, getString(R.string.image_failed, e.getMessage()), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void takePhoto() {
+        java.io.File dir = new java.io.File(getCacheDir(), "camera");
+        java.io.File[] old = dir.listFiles();
+        if (old != null) for (java.io.File f : old) f.delete();
+        dir.mkdirs();
+        java.io.File f = new java.io.File(dir, "photo-" + System.currentTimeMillis() + ".jpg");
+        cameraUri = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".files", f);
+        Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE).putExtra(MediaStore.EXTRA_OUTPUT, cameraUri)
+            .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(i, REQ_CAMERA);
+        } catch (Exception e) {
+            Toast.makeText(this, getString(R.string.image_failed, e.getMessage()), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int result, Intent data) {
+        super.onActivityResult(req, result, data);
+        if (result != RESULT_OK) return;
+        Uri u = req == REQ_PICK ? (data != null ? data.getData() : null) : req == REQ_CAMERA ? cameraUri : null;
+        if (u == null) return;
+        pendingImage = u;
+        // The service may still be reconnecting after the picker; it is sent once the session is attached
+        main.postDelayed(this::sendPendingImage, 300);
+    }
+
+    private void sendPendingImage() {
+        Uri u = pendingImage;
+        if (u == null || service == null) return;
+        if (service.state() != TermService.State.CONNECTED || service.currentSession() == null || panel.shown()) {
+            Toast.makeText(this, R.string.image_pending, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pendingImage = null;
+        showStatus(getString(R.string.image_uploading), t.amber);
+        service.uploadImage(u, (path, err) -> {
+            status.setVisibility(View.GONE);
+            if (err != null) {
+                Toast.makeText(this, getString(R.string.image_failed, err), Toast.LENGTH_LONG).show();
+                return;
+            }
+            TerminalSession s = service.term;
+            if (s.getEmulator() != null) s.getEmulator().paste(path.contains(" ") ? "'" + path + "'" : path);
+        });
+    }
+
     // ---- connection state ----
 
     @Override
@@ -815,6 +1080,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     public void onAttached(String name) {
         panel.hide();
+        main.postDelayed(this::sendPendingImage, 300);
         view.requestFocus();
         refreshTitle();
         main.removeCallbacks(titlePoll);

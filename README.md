@@ -17,11 +17,13 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 
 | | |
 |---|---|
-| Persistent sessions | A small session daemon on the host keeps each session's terminal. When you come back it replays recent output, so you scroll it right on the phone. Name it when you create it, pick what to run (shell, Claude Code, herdr or any command) and where to start. |
+| Persistent sessions | A small session daemon on the host keeps each session's terminal, screen and last 5,000 lines. When you come back you get the screen exactly as it is, and you scroll the history right on the phone. Name it when you create it, pick what to run (shell, Claude Code, herdr or any command) and where to start. |
 | Session list | Sessions are grouped into "Needs you", "Running" and "Idle", with a live preview of the last lines. |
 | Several machines | Add as many machines as you like and switch between them from the top of the session list. Each one remembers its last session. |
 | Notifications | Claude Code "needs your input" and "finished" (with its last reply), plus an optional terminal bell from any program. |
 | One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. |
+| Voice input | Tap the mic key and talk: the text appears live above the keys, then insert it or send it, without opening the keyboard. Uses Volcengine (Doubao) streaming speech recognition with your own key. |
+| Images | Send a photo or screenshot to the session (photos, camera, or share from another app). It is copied to the machine and its path typed in, which Claude Code reads as an image. |
 | Phone-first keys | One row of keys, swipe up on a key for its second function, a sheet with symbols, Ctrl combos, paste and an input box for dictation. |
 | Light and dark | Follows the system, or pick one. |
 | CJK aware | Sarasa Term SC keeps Chinese glyphs exactly two columns wide. |
@@ -91,7 +93,9 @@ SSH connection ───── attach ───────▶ moor attach ─�
 ```
 
 - One SSH connection to the current machine carries the attached terminal plus short exec channels for listing and creating sessions. Notifications come from the current machine.
-- The app installs the helper to `~/.local/share/moor/bin/moor` when it connects. The helper starts the session daemon on demand; it keeps the last 256 KB of each session's output and restores terminal modes (alternate screen, mouse, bracketed paste) on attach.
+- The app installs the helper to `~/.local/share/moor/bin/moor` when it connects. The helper starts the session daemon on demand. The daemon runs each session's output through a terminal emulator, so attaching sends a snapshot: the history, the screen, the cursor and terminal modes (alternate screen, mouse, bracketed paste).
+- When the helper is updated, the running daemon swaps in the new code without stopping any session.
+- Images go to `~/.cache/moor/uploads` on the machine; files older than a week are removed.
 - Pairing: `moor pair` adds a throwaway key to `authorized_keys` with `expiry-time`, `restrict` and `command=` so it can only run `moor claim`. The QR code carries the host, the host key and the throwaway key's seed. The phone logs in once, hands over its own public key, and the throwaway key is removed. The host key from the QR code is pinned, so there is no trust-on-first-use prompt.
 - The private key is generated on the phone and never leaves it.
 

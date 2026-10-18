@@ -503,6 +503,28 @@ public class TermService extends Service {
         });
     }
 
+    /** Copies an image to the machine; the result is its full path there. */
+    void uploadImage(android.net.Uri uri, Result<String> cb) {
+        final SshLink l = link;
+        if (l == null) {
+            cb.done(null, getString(R.string.err_not_connected));
+            return;
+        }
+        io.execute(() -> {
+            String out = null, err = null;
+            try {
+                Images.Prepared p = Images.prepare(this, uri);
+                out = l.exec(Images.uploadCommand(p.ext), p.bytes, 60_000).trim();
+                if (!out.startsWith("/")) throw new java.io.IOException("unexpected reply: " + out);
+            } catch (Exception e) {
+                Log.w(TAG, "image upload failed", e);
+                err = e.getMessage();
+            }
+            final String o = out, m = err;
+            main.post(() -> cb.done(o, m));
+        });
+    }
+
     /** Runs a command on the machine; result is its stdout. */
     void run(String cmd, Result<String> cb) {
         final SshLink l = link;
