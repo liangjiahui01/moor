@@ -144,6 +144,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         Prefs.raw(this).edit().remove("fullscreen").apply(); // the fullscreen mode is gone
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(t.bg));
         keyArea = Ui.column(this);
+        keyArea.setClipChildren(false);
         keyArea.setBackgroundColor(t.keyBar);
         buildKeys();
         root.addView(keyArea, new LinearLayout.LayoutParams(-1, -2));
@@ -447,6 +448,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         LinearLayout bar = Ui.row(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(8), dp(6), dp(8), dp(8));
+        // The mic swells with your voice: let it grow past its slot instead of being cut off
+        bar.setClipChildren(false);
+        bar.setClipToPadding(false);
         stripToggle = roundButton(R.drawable.ic_chevron_down, R.string.a11y_key_strip, false, v -> toggleKeyStrip());
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(36), dp(44));
         tlp.rightMargin = dp(6);
@@ -462,6 +466,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         input.setTypeface(Ui.mono(this));
         input.setPadding(dp(16), dp(10), dp(16), dp(10));
         input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
+        input.setOnTouchListener(this::onInputTouch);
         // A single line that scrolls sideways as text grows (dictation included), so the bar never
         // changes height; Send on the keyboard's Enter key
         input.setInputType(InputType.TYPE_CLASS_TEXT);
@@ -839,12 +844,92 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     // ---- voice input: speech to text without the keyboard ----
 
-    private static final int REQ_MIC = 2, REQ_PICK = 3, REQ_CAMERA = 4;
+    private static final int REQ_MIC = 2, REQ_PICK = 3, REQ_CAMERA = 4, REQ_MIC_HOLD = 5;
     private VoiceInput voice;
     /** The box's text when dictation started; the transcript goes after it. */
     private String voiceBase = "";
 
     /** The mic button: starts dictation into the input box; a second tap stops it. */
+    // ---- hold to talk: press and hold the empty input box, release to send, slide up to cancel ----
+
+    private boolean holding, holdCancel, sendWhenDone;
+    private float holdY;
+    private final Runnable holdStart = this::startHold;
+
+    private boolean onInputTouch(View v, MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                holding = false;
+                holdCancel = false;
+                holdY = e.getRawY();
+                if (input.getText().length() == 0 && voice == null) main.postDelayed(holdStart, 350);
+                return false;
+            case MotionEvent.ACTION_MOVE:
+                if (!holding) {
+                    if (Math.abs(e.getRawY() - holdY) > dp(10)) main.removeCallbacks(holdStart);
+                    return false;
+                }
+                boolean c = holdY - e.getRawY() > dp(60);
+                if (c != holdCancel) {
+                    holdCancel = c;
+                    styleHold();
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                main.removeCallbacks(holdStart);
+                if (!holding) return false;
+                holding = false;
+                endHold(e.getActionMasked() == MotionEvent.ACTION_UP && !holdCancel);
+                return true;
+            default:
+                return holding;
+        }
+    }
+
+    private void startHold() {
+        if (!VoiceInput.Config.load(this).usable()) {
+            showVoiceSetup();
+            return;
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC_HOLD);
+            return;
+        }
+        holding = true;
+        // Take the gesture from the text box, so no selection menu or keyboard comes up
+        input.cancelLongPress();
+        long now = android.os.SystemClock.uptimeMillis();
+        MotionEvent cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0, 0, 0);
+        input.onTouchEvent(cancel);
+        cancel.recycle();
+        input.setCursorVisible(false); // no cursor or its drag handle while talking
+        input.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        startVoice();
+        styleHold();
+    }
+
+    private void styleHold() {
+        if (voice == null) return;
+        input.setHint(holdCancel ? R.string.hold_cancel : R.string.hold_send);
+        input.setBackground(Ui.outline(t.key, holdCancel ? t.red : t.accent, dp(2), dp(22)));
+    }
+
+    private void endHold(boolean send) {
+        input.setCursorVisible(true);
+        input.setBackground(t.dark ? Ui.round(t.key, dp(22)) : Ui.outline(t.key, t.line, dp(1), dp(22)));
+        if (voice == null) return;
+        if (send) {
+            sendWhenDone = true;
+            input.setHint(R.string.voice_finishing);
+            voice.stop();
+        } else {
+            voice.cancel();
+            endVoice();
+            input.setText("");
+        }
+    }
+
     private void toggleVoice() {
         if (voice != null) {
             input.setHint(R.string.voice_finishing);
@@ -881,7 +966,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             @Override
             public void onDone(String text) {
                 showTranscript(text);
+                boolean send = sendWhenDone;
                 endVoice();
+                if (send && !input.getText().toString().trim().isEmpty()) sendInput();
             }
 
             @Override
@@ -909,6 +996,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private void endVoice() {
         voice = null;
+        sendWhenDone = false;
         if (micKey != null) micKey.animate().cancel();
         if (micKey != null) {
             micKey.setScaleX(1f);

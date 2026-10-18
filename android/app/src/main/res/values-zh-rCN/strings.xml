@@ -120,7 +120,7 @@
     <string name="k_hide_bar">隐藏顶栏</string>
     <string name="k_settings">设置</string>
     <string name="k_font_size">字号</string>
-    <string name="input_hint">输入命令…</string>
+    <string name="input_hint">长按说话，点按打字</string>
     <string name="input_send">发送</string>
 
     <string name="welcome_title">欢迎使用 Moor</string>
@@ -253,4 +253,6 @@
     <string name="t_screen_on">会话中保持亮屏</string>
     <string name="t_screen_on_sub">在 Moor 里打开会话时屏幕不自动熄灭</string>
     <string name="a11y_key_strip">显示或收起功能键</string>
+    <string name="hold_send">松手发送，上滑取消</string>
+    <string name="hold_cancel">松手取消</string>
 </resources>
