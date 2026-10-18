@@ -131,7 +131,7 @@ public class PairActivity extends Activity {
         bindService(new Intent(this, TermService.class), new ServiceConnection() {
             @Override
             public void onServiceConnected(ComponentName name, IBinder binder) {
-                ((TermService.LocalBinder) binder).service().reconnectWithNewSettings();
+                ((TermService.LocalBinder) binder).service().switchMachine(Prefs.currentId(PairActivity.this));
                 unbindService(this);
             }
 

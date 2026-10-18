@@ -38,7 +38,6 @@
     <string name="state_host_key_changed">Host key changed, forget it in settings if this is expected</string>
     <string name="state_wait_foreground">%1$s, reconnects when you open the app</string>
     <string name="state_retry_in">%1$s, retrying in %2$ds</string>
-    <string name="conn_connected">Connected · %1$s</string>
 
     <!-- errors -->
     <string name="err_network">Network dropped</string>
@@ -147,7 +146,7 @@
     <string name="sec_keys">KEYS</string>
     <string name="pair_scan">Scan QR</string>
     <string name="pair_paste">Paste link</string>
-    <string name="pair_hint">Pairing fills in everything below and adds this phone\'s key to the host.</string>
+    <string name="pair_hint">Pairing adds the machine (or updates it if it is already here) and registers this phone\'s key on it.</string>
     <string name="f_host">Host</string>
     <string name="f_port">Port</string>
     <string name="f_user">User</string>
@@ -189,7 +188,7 @@
     <string name="pair_not_link">No pairing link found. Run moor pair on your machine and copy the link it prints.</string>
     <string name="pair_expired">This pairing code has expired. Run moor pair again.</string>
     <string name="pair_title">Pair with this machine?</string>
-    <string name="pair_body">%1$s\nDefault command: %2$s\n\nThis adds the phone\'s key to the machine and replaces the current connection settings.</string>
+    <string name="pair_body">%1$s\nDefault command: %2$s\n\nThis adds the phone\'s key to the machine and adds the machine to Moor, or updates it if it is already here.</string>
     <string name="pair_shell_only">shell</string>
     <string name="pair_confirm">Pair</string>
     <string name="pair_running">Pairing…</string>
@@ -200,4 +199,16 @@
     <string name="pair_err_auth">The pairing code was already used or has expired. Run moor pair again.</string>
     <string name="pair_err_network">Cannot reach the machine. Check that the phone is on a network that can reach it.</string>
     <string name="pair_err_generic">Pairing failed: %1$s</string>
+    <!-- machines -->
+    <string name="machines_title">Machines</string>
+    <string name="machine_new">New machine</string>
+    <string name="add_machine">Add a machine</string>
+    <string name="add_machine_hint">Run moor pair on the machine and scan its QR code, or enter the connection yourself.</string>
+    <string name="add_manual">Enter manually</string>
+    <string name="f_name">Name</string>
+    <string name="remove_machine">Remove this machine</string>
+    <string name="remove_machine_title">Remove %1$s?</string>
+    <string name="remove_machine_body">Moor forgets its connection settings. Sessions on the machine keep running, and its authorized_keys is not touched.</string>
+    <string name="remove">Remove</string>
+    <string name="a11y_switch_machine">Switch machine</string>
 </resources>

@@ -73,11 +73,15 @@ final class SessionPanel extends FrameLayout {
         connText = Ui.oneLine(Ui.text(c, "", 12.5f, t.sub, Ui.REGULAR), TextUtils.TruncateAt.END);
         connText.setPadding(dp(8), 0, 0, 0);
         chip.addView(connText);
-        chip.setOnClickListener(v -> {
-            TermService s = host.service();
-            if (s != null) s.retryNow();
-        });
-        top.addView(chip, Ui.lp(-2, dp(30)));
+        android.widget.ImageView chev = Ui.icon(c, R.drawable.ic_chevron_down, t.faint, 14);
+        ((LinearLayout.LayoutParams) chev.getLayoutParams()).leftMargin = dp(4);
+        chip.addView(chev);
+        chip.setContentDescription(c.getString(R.string.a11y_switch_machine));
+        chip.setOnClickListener(v -> showMachines());
+        LinearLayout.LayoutParams clp = Ui.lp(-2, dp(32));
+        clp.weight = 0;
+        top.addView(chip, clp);
+        connText.setMaxWidth(dp(230));
         top.addView(new View(c), new LinearLayout.LayoutParams(0, 1, 1f));
         top.addView(Ui.iconButton(c, t, R.drawable.ic_settings, t.sub, c.getString(R.string.k_settings), v -> host.openSettings()));
         head.addView(top);
@@ -159,8 +163,9 @@ final class SessionPanel extends FrameLayout {
     void onState(TermService.State state, String message) {
         int color = state == TermService.State.CONNECTED ? t.accent : state == TermService.State.FAILED ? t.red : t.amber;
         connDot.setBackground(Ui.round(color, dp(4)));
-        connText.setText(state == TermService.State.CONNECTED
-            ? getContext().getString(R.string.conn_connected, message) : message);
+        String label = Prefs.load(getContext()).label(getContext());
+        connText.setText(state == TermService.State.CONNECTED || message == null || message.isEmpty()
+            ? label : label + " · " + message);
         newButton.setVisibility(state == TermService.State.CONNECTED ? VISIBLE : GONE);
         if (shown()) {
             if (state == TermService.State.CONNECTED) refresh();
@@ -422,6 +427,117 @@ final class SessionPanel extends FrameLayout {
         box.addView(menuItem(c.getString(R.string.menu_rename), t.text, () -> { d.dismiss(); showRename(i); }));
         box.addView(menuItem(c.getString(R.string.menu_close), t.red, () -> { d.dismiss(); confirmKill(i); }));
         d.show();
+    }
+
+    // ---- machines ----
+
+    private void showMachines() {
+        Context c = getContext();
+        TermService s = host.service();
+        LinearLayout box = Ui.column(c);
+        TextView title = Ui.text(c, c.getString(R.string.machines_title), 20, t.text, Ui.SEMIBOLD);
+        title.setPadding(dp(4), 0, 0, dp(10));
+        box.addView(title);
+        Dialog d = Ui.bottomSheet(c, t, box);
+        String cur = Prefs.currentId(c);
+        for (Prefs.Machine m : Prefs.machines(c)) {
+            boolean isCur = m.id.equals(cur);
+            LinearLayout r = Ui.row(c);
+            r.setPadding(dp(14), dp(10), dp(12), dp(10));
+            r.setMinimumHeight(dp(62));
+            int dot = !isCur ? t.line : s != null && s.state() == TermService.State.CONNECTED ? t.accent
+                : s != null && s.state() == TermService.State.FAILED ? t.red : t.amber;
+            r.addView(Ui.dot(c, dot, 9));
+            LinearLayout labels = Ui.column(c);
+            labels.setPadding(dp(14), 0, dp(8), 0);
+            labels.addView(Ui.oneLine(Ui.text(c, m.label(c), 16, t.text, Ui.SEMIBOLD), TextUtils.TruncateAt.END));
+            TextView sub = Ui.oneLine(Ui.monoText(c, m.configured ? m.address() : c.getString(R.string.not_set), 11.5f, t.faint),
+                TextUtils.TruncateAt.MIDDLE);
+            sub.setPadding(0, dp(3), 0, 0);
+            labels.addView(sub);
+            r.addView(labels, Ui.weight(1));
+            if (isCur) {
+                TextView tag = Ui.text(c, c.getString(R.string.tag_current), 11, t.onAccent, Ui.SEMIBOLD);
+                tag.setPadding(dp(8), dp(3), dp(8), dp(3));
+                tag.setBackground(Ui.round(t.accent, dp(8)));
+                r.addView(tag);
+            }
+            r.setBackground(Ui.pressable(t, isCur ? Ui.round(t.chip, dp(14)) : null, dp(14)));
+            r.setOnClickListener(v -> {
+                d.dismiss();
+                TermService sv = host.service();
+                if (sv == null) return;
+                if (!isCur) {
+                    last = null;
+                    sv.switchMachine(m.id);
+                    render();
+                } else if (sv.state() != TermService.State.CONNECTED) {
+                    sv.retryNow();
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(4);
+            box.addView(r, lp);
+        }
+        LinearLayout add = Ui.row(c);
+        add.setPadding(dp(12), 0, dp(12), 0);
+        add.addView(Ui.icon(c, R.drawable.ic_plus, t.accent, 20));
+        TextView al = Ui.text(c, c.getString(R.string.add_machine), 15.5f, t.accent, Ui.SEMIBOLD);
+        al.setPadding(dp(12), 0, 0, 0);
+        add.addView(al);
+        add.setBackground(Ui.pressable(t, null, dp(14)));
+        add.setOnClickListener(v -> {
+            d.dismiss();
+            showAdd();
+        });
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-1, dp(52));
+        alp.topMargin = dp(6);
+        box.addView(add, alp);
+        d.show();
+    }
+
+    private void showAdd() {
+        Context c = getContext();
+        LinearLayout box = Ui.column(c);
+        TextView title = Ui.text(c, c.getString(R.string.add_machine), 20, t.text, Ui.SEMIBOLD);
+        title.setPadding(dp(4), 0, 0, dp(4));
+        box.addView(title);
+        TextView hint = Ui.text(c, c.getString(R.string.add_machine_hint), 13, t.sub, Ui.REGULAR);
+        hint.setLineSpacing(dp(3), 1f);
+        hint.setPadding(dp(4), 0, dp(4), dp(10));
+        box.addView(hint);
+        Dialog d = Ui.bottomSheet(c, t, box);
+        box.addView(addOption(R.drawable.ic_scan, R.string.pair_scan, () -> {
+            d.dismiss();
+            c.startActivity(new android.content.Intent(c, PairActivity.class).putExtra(PairActivity.EXTRA_MODE, PairActivity.MODE_SCAN));
+        }));
+        box.addView(addOption(R.drawable.ic_link, R.string.pair_paste, () -> {
+            d.dismiss();
+            c.startActivity(new android.content.Intent(c, PairActivity.class).putExtra(PairActivity.EXTRA_MODE, PairActivity.MODE_PASTE));
+        }));
+        box.addView(addOption(R.drawable.ic_key, R.string.add_manual, () -> {
+            d.dismiss();
+            c.startActivity(new android.content.Intent(c, SettingsActivity.class).putExtra(SettingsActivity.EXTRA_NEW_MACHINE, true));
+        }));
+        d.show();
+    }
+
+    private View addOption(int icon, int label, Runnable r) {
+        Context c = getContext();
+        LinearLayout o = Ui.row(c);
+        o.setPadding(dp(12), 0, dp(12), 0);
+        LinearLayout ib = new LinearLayout(c);
+        ib.setGravity(Gravity.CENTER);
+        ib.setBackground(Ui.round(t.chip, dp(10)));
+        ib.addView(Ui.icon(c, icon, t.text, 18));
+        o.addView(ib, Ui.lp(dp(36), dp(36)));
+        TextView l = Ui.text(c, c.getString(label), 15.5f, t.text, Ui.MEDIUM);
+        l.setPadding(dp(14), 0, 0, 0);
+        o.addView(l);
+        o.setBackground(Ui.pressable(t, null, dp(14)));
+        o.setOnClickListener(v -> r.run());
+        o.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(58)));
+        return o;
     }
 
     private View menuItem(String label, int color, Runnable r) {

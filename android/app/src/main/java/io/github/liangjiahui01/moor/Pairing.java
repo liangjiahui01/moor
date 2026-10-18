@@ -17,7 +17,7 @@ import java.util.Base64;
 import java.util.Properties;
 
 /**
- * Pairing link: moor://pair?v=1&h=&p=&u=&c=&hk=&k=&id=&exp=
+ * Pairing link: moor://pair?v=1&h=&p=&u=&c=&n=&hk=&k=&id=&exp=  (n = the machine's hostname)
  * Printed by `moor pair` on the host. k seeds a throwaway key that can only run `claim`:
  * the phone logs in with it once and hands over its own public key; the host stores
  * that key and removes the throwaway one.
@@ -25,12 +25,12 @@ import java.util.Properties;
 final class Pairing {
     static final String PREFIX = "moor://pair?";
 
-    final String host, user, cmd, hostKey, id;
+    final String host, user, cmd, hostKey, id, name;
     final int port;
     final long expiresAt;
     private final byte[] seed;
 
-    private Pairing(String host, int port, String user, String cmd, String hostKey, byte[] seed, String id, long exp) {
+    private Pairing(String host, int port, String user, String cmd, String hostKey, byte[] seed, String id, long exp, String name) {
         this.host = host;
         this.port = port;
         this.user = user;
@@ -39,6 +39,7 @@ final class Pairing {
         this.seed = seed;
         this.id = id;
         this.expiresAt = exp;
+        this.name = name;
     }
 
     /** Returns null when the text holds no pairing link. Tolerates surrounding whitespace from terminal copies. */
@@ -60,8 +61,9 @@ final class Pairing {
             String c = u.getQueryParameter("c");
             String e = u.getQueryParameter("exp");
             String id = u.getQueryParameter("id");
+            String n = u.getQueryParameter("n");
             return new Pairing(host, p == null ? 22 : Integer.parseInt(p), user, c == null ? "" : c, hk, seed,
-                id == null ? "" : id, e == null ? 0 : Long.parseLong(e) * 1000);
+                id == null ? "" : id, e == null ? 0 : Long.parseLong(e) * 1000, n == null ? "" : n.trim());
         } catch (RuntimeException ex) {
             return null;
         }
@@ -109,9 +111,17 @@ final class Pairing {
         }
     }
 
-    /** Saves the connection and pins the host key from the link instead of trusting on first use. */
+    /**
+     * Saves the machine (updates it if this address is already known, fills the current one if it is still
+     * empty, else adds a new one) and makes it current. Pins the host key from the link instead of trusting
+     * on first use.
+     */
     void save(Context c) throws Exception {
+        String existing = Prefs.find(c, host, port, user);
+        if (existing != null) Prefs.select(c, existing);
+        else if (Prefs.load(c).configured()) Prefs.addMachine(c);
         Prefs.save(c, host, port, user, cmd);
+        if (!name.isEmpty() && Prefs.load(c).name.isEmpty()) Prefs.put(c, "name", name);
         File store = new File(c.getFilesDir(), "known_hosts");
         Properties known = new Properties();
         if (store.exists()) {

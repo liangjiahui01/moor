@@ -19,6 +19,7 @@ Moor connects to a machine you can SSH into, keeps every session in tmux there, 
 |---|---|
 | Persistent sessions | Each session is a tmux session on the host, on its own socket, so it never touches your own tmux setup. Name it when you create it, pick what to run (shell, Claude Code, herdr or any command) and where to start. |
 | Session list | Sessions are grouped into "Needs you", "Running" and "Idle", with a live preview of the last lines. |
+| Several machines | Add as many machines as you like and switch between them from the top of the session list. Each one remembers its last session. |
 | Notifications | Claude Code "needs your input" and "finished" (with its last reply), plus an optional terminal bell from any program. |
 | One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. |
 | Phone-first keys | One row of keys, swipe up on a key for its second function, a sheet with symbols, Ctrl combos, paste and an input box for dictation. |
@@ -46,8 +47,10 @@ Moor connects to a machine you can SSH into, keeps every session in tmux there, 
 
    ```sh
    moor pair                       # host = first IPv4 address, port 22
-   moor pair --host my-box.lan --cmd claude
+   moor pair --host my-box.lan --cmd claude --name my-box
    ```
+
+To add another machine later, run `moor pair` on it and use Add a machine at the top of the session list. Scanning a machine you already have updates it.
 
 Prefer to do it by hand? Fill in host, port and user in Settings, then copy the phone's public key into `~/.ssh/authorized_keys` on the host (Settings, Copy install command).
 
@@ -87,7 +90,7 @@ SSH connection ───── attach ───────▶ tmux -L moor  (on
                        (moor notify claude)   (moor notify bell)
 ```
 
-- One SSH connection carries the attached terminal plus short exec channels for listing and creating sessions.
+- One SSH connection to the current machine carries the attached terminal plus short exec channels for listing and creating sessions. Notifications come from the current machine.
 - The app installs the helper to `~/.local/share/moor/bin/moor` and its tmux config to `~/.config/moor/tmux.conf` when it connects.
 - Pairing: `moor pair` adds a throwaway key to `authorized_keys` with `expiry-time`, `restrict` and `command=` so it can only run `moor claim`. The QR code carries the host, the host key and the throwaway key's seed. The phone logs in once, hands over its own public key, and the throwaway key is removed. The host key from the QR code is pinned, so there is no trust-on-first-use prompt.
 - The private key is generated on the phone and never leaves it.

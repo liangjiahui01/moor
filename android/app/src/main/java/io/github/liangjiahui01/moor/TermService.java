@@ -112,6 +112,8 @@ public class TermService extends Service {
     private ConnectivityManager.NetworkCallback netCallback;
     /** Sessions waiting for the user (latest attention event per session). */
     private final Map<String, Event> attention = new HashMap<>();
+    /** The machine this service's state (session, attention) belongs to. */
+    private String machineId;
 
     class LocalBinder extends Binder {
         TermService service() { return TermService.this; }
@@ -127,6 +129,7 @@ public class TermService extends Service {
         super.onCreate();
         term = new TerminalSession(5000, clientProxy);
         current = Prefs.load(this).session;
+        machineId = Prefs.currentId(this);
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL_CONN, getString(R.string.channel_connection),
             NotificationManager.IMPORTANCE_LOW));
@@ -261,7 +264,21 @@ public class TermService extends Service {
 
     String stateMessage() { return message; }
 
+    /** Makes another machine current: drops this connection and connects there, back to its last session. */
+    void switchMachine(String id) {
+        Prefs.select(this, id);
+        reconnectWithNewSettings();
+    }
+
+    /** Reconnects with the current settings; if the current machine changed, starts from its own state. */
     void reconnectWithNewSettings() {
+        String id = Prefs.currentId(this);
+        if (!id.equals(machineId)) {
+            machineId = id;
+            attention.clear();
+            current = Prefs.load(this).session;
+            if (screen != null) screen.onSessionsChanged();
+        }
         attempt = 0;
         main.removeCallbacks(reconnect);
         dropLink();

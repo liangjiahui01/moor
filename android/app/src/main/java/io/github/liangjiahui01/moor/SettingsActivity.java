@@ -24,6 +24,8 @@ import android.widget.Toast;
 
 /** Settings: pairing and connection, notifications, terminal look, keys. */
 public class SettingsActivity extends Activity {
+    /** Boolean extra: start with a fresh, empty machine (dropped again if the user leaves without connecting). */
+    static final String EXTRA_NEW_MACHINE = "new_machine";
 
     private Theme t;
     private LinearLayout page;
@@ -48,7 +50,25 @@ public class SettingsActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         bindService(new Intent(this, TermService.class), conn, 0);
+        if (savedInstanceState == null && getIntent().getBooleanExtra(EXTRA_NEW_MACHINE, false)) {
+            Prefs.raw(this).edit().putString("adding_from", Prefs.currentId(this)).apply();
+            Prefs.addMachine(this);
+        }
         build();
+    }
+
+    /** Leaving the "new machine" form without connecting: drop the empty machine, go back to the previous one. */
+    @Override
+    public void finish() {
+        String from = Prefs.raw(this).getString("adding_from", null);
+        if (from != null) {
+            Prefs.raw(this).edit().remove("adding_from").apply();
+            if (!Prefs.load(this).configured()) {
+                Prefs.removeMachine(this, Prefs.currentId(this));
+                Prefs.select(this, from);
+            }
+        }
+        super.finish();
     }
 
     @Override
@@ -82,8 +102,10 @@ public class SettingsActivity extends Activity {
         setContentView(root);
 
         // ---- connection ----
+        int machineCount = Prefs.machines(this).size();
         if (!p.configured()) {
-            TextView hello = Ui.text(this, getString(R.string.welcome_title), 26, t.text, Ui.SEMIBOLD);
+            TextView hello = Ui.text(this, getString(machineCount > 1 ? R.string.add_machine : R.string.welcome_title),
+                26, t.text, Ui.SEMIBOLD);
             hello.setPadding(dp(4), dp(8), 0, dp(8));
             page.addView(hello);
             TextView sub = Ui.text(this, getString(R.string.welcome_body), 14, t.sub, Ui.REGULAR);
@@ -103,6 +125,9 @@ public class SettingsActivity extends Activity {
         page.addView(pairHint);
 
         LinearLayout card = card();
+        card.addView(valueRow(R.string.f_name, p.label(this), true,
+            () -> editField(R.string.f_name, "name", p.name, InputType.TYPE_CLASS_TEXT)));
+        card.addView(divider());
         card.addView(valueRow(R.string.f_host, p.host.isEmpty() ? getString(R.string.not_set) : p.host, true,
             () -> editField(R.string.f_host, "host", p.host, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI)));
         card.addView(divider());
@@ -115,6 +140,16 @@ public class SettingsActivity extends Activity {
         card.addView(valueRow(R.string.f_default_cmd, p.startup.isEmpty() ? getString(R.string.run_shell) : p.startup, true,
             () -> editField(R.string.f_default_cmd, "startup", p.startup, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)));
         page.addView(card);
+        if (p.configured() && machineCount > 1) {
+            TextView remove = Ui.text(this, getString(R.string.remove_machine), 14.5f, t.red, Ui.REGULAR);
+            remove.setGravity(Gravity.CENTER_VERTICAL);
+            remove.setPadding(dp(16), 0, dp(16), 0);
+            remove.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
+            remove.setOnClickListener(v -> confirmRemove(p.label(this)));
+            LinearLayout.LayoutParams rlp = Ui.lp(-1, dp(52));
+            rlp.topMargin = dp(10);
+            page.addView(remove, rlp);
+        }
         if (!p.configured()) {
             TextView go = Ui.primaryButton(this, t, getString(R.string.connect), v -> saveAndConnect());
             LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-1, dp(52));
@@ -201,7 +236,8 @@ public class SettingsActivity extends Activity {
             return;
         }
         Prefs.save(this, p.host, p.port, p.user, p.startup);
-        reconnect();
+        Prefs.raw(this).edit().remove("adding_from").apply();
+        if (service != null) service.switchMachine(Prefs.currentId(this));
         startActivity(new Intent(this, TermActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
         finish();
     }
@@ -229,12 +265,12 @@ public class SettingsActivity extends Activity {
                 } catch (NumberFormatException x) {
                     port = 22;
                 }
-                Prefs.raw(this).edit().putInt("port", port).apply();
+                Prefs.putPort(this, port);
             } else {
                 Prefs.put(this, key, s);
             }
             d.dismiss();
-            if (!key.equals("startup")) reconnect();
+            if (!key.equals("startup") && !key.equals("name")) reconnect();
             rebuild();
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(52));
@@ -291,6 +327,32 @@ public class SettingsActivity extends Activity {
                 if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show();
                 checkHooks();
             });
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        lp.leftMargin = dp(10);
+        buttons.addView(go, lp);
+        d.show();
+    }
+
+    private void confirmRemove(String label) {
+        LinearLayout box = Ui.column(this);
+        box.addView(Ui.text(this, getString(R.string.remove_machine_title, label), 19, t.text, Ui.SEMIBOLD));
+        TextView body = Ui.text(this, getString(R.string.remove_machine_body), 14, t.sub, Ui.REGULAR);
+        body.setLineSpacing(dp(4), 1f);
+        body.setPadding(0, dp(10), 0, dp(18));
+        box.addView(body);
+        LinearLayout buttons = Ui.row(this);
+        box.addView(buttons);
+        Dialog d = Ui.bottomSheet(this, t, box);
+        buttons.addView(Ui.secondaryButton(this, t, getString(R.string.cancel), v -> d.dismiss()), new LinearLayout.LayoutParams(0, dp(50), 1f));
+        TextView go = Ui.text(this, getString(R.string.remove), 16, 0xffffffff, Ui.SEMIBOLD);
+        go.setGravity(Gravity.CENTER);
+        go.setBackground(Ui.pressable(t, Ui.round(t.red, dp(14)), dp(14)));
+        go.setOnClickListener(v -> {
+            d.dismiss();
+            Prefs.removeMachine(this, Prefs.currentId(this));
+            if (service != null) service.switchMachine(Prefs.currentId(this));
+            finish();
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(50), 1f);
         lp.leftMargin = dp(10);
