@@ -6,7 +6,7 @@
         connection and register the phone's SSH key in one step.
     moor new NAME [--cmd CMD] [--cwd DIR] / ls / attach NAME / kill NAME / rename NAME NEW
         Terminal sessions that keep running after you disconnect. A small daemon
-        (started on demand) owns them and replays recent output when you attach.
+        (started on demand) owns them and keeps their screen and history for when you attach.
     moor hooks install|uninstall|status
         Add (or remove) Claude Code hooks that send "needs your input" and
         "finished" events to the phone.
@@ -26,6 +26,8 @@ that key and deletes the throwaway one.
 """
 import argparse
 import base64
+import codecs
+import collections
 import datetime
 import fcntl
 import getpass
@@ -337,132 +339,831 @@ def hooks(action):
 
 # ---------------------------------------------------------------- sessions
 #
-# A small daemon keeps the terminal sessions: it owns each session's pty, keeps the last output so a
-# phone that attaches later gets it replayed (and can scroll it locally), and remembers terminal modes
-# (alternate screen, mouse reporting, ...) so they are restored after the replay. The app talks to it
-# through the commands below over SSH; `moor attach` relays a session through the SSH channel's pty.
+# A small daemon keeps the terminal sessions: it owns each session's pty and runs its output through a terminal
+# emulator, so a phone that attaches later gets the exact screen and recent history (and scrolls it locally).
+# The app talks to it through the commands below over SSH; `moor attach` relays a session through the SSH
+# channel's pty.
 
 STATE = pathlib.Path(os.environ.get("MOOR_STATE", HOME / ".local" / "state" / "moor"))
 SOCK = STATE / "daemon.sock"
 if len(str(SOCK)) > 100:  # AF_UNIX path limit; keep a private short path instead
     SOCK = pathlib.Path(tempfile.gettempdir()) / f"moor-{os.getuid()}" / "daemon.sock"
-PROTO = 1
-LOG_CAP = 256 * 1024
+PROTO = 2
+# Identifies this helper's code: a daemon running other code replaces itself (see Daemon.upgrade)
+try:
+    import hashlib
+    CODE_ID = hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
+except OSError:
+    CODE_ID = ""
 SHELL_NAMES = {"zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "nu", "login"}
-TRACKED_MODES = (1, 7, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 2004)
-ALT_MODES = {47, 1047, 1049}
-MODE_RE = re.compile(rb"\x1b\[\?([0-9;]+)([hl])")
-OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-# The app treats terminal replies produced while replaying as stale and drops them until it sees this.
-REPLAY_DONE = b"\x1b]7777;moor-replayed\x07"
+BACKLOG_MAX = 8 * 1024 * 1024  # output the emulator hasn't caught up with; beyond this only the tail is kept
+BACKLOG_KEEP = 2 * 1024 * 1024
 
 
-def _complete_escape(buf, i):
-    """True if the escape sequence starting at buf[i] is complete."""
-    if i + 1 >= len(buf):
-        return False
-    kind = buf[i + 1]
-    if kind == 0x5B:  # CSI
-        return any(0x40 <= b <= 0x7E for b in buf[i + 2:])
-    if kind in (0x5D, 0x50, 0x5E, 0x5F):  # OSC, DCS, PM, APC
-        rest = buf[i + 2:]
-        return b"\x07" in rest or b"\x1b\\" in rest
-    return True
+# ---------------------------------------------------------------- terminal emulator
+# Each session runs its output through this emulator, so a phone that attaches gets the exact screen and
+# history (a snapshot) instead of a replay of raw output. Scrollback rows are kept serialized: they never change.
+
+SCROLLBACK = 5000
+SNAPSHOT_BUDGET = 2 * 1024 * 1024
+REPLAY_DONE = "\x1b]7777;moor-replayed\x07"
+DEC_GRAPHICS = str.maketrans("`abcdefghijklmnopqrstuvwxyz{|}~", "◆▒␉␌␍␊°±␤␋┘┐┌└┼⎺⎻─⎼⎽├┤┴┬│≤≥π≠£·")
+PEN_ORDER = ("b", "d", "i", "u", "k", "r", "h", "s", "o", "fg", "bg", "uc")
+PEN_FLAGS = {1: "b", 2: "d", 3: "i", 5: "k", 7: "r", 8: "h", 9: "s", 53: "o"}
+PEN_OFF = {22: ("b", "d"), 23: ("i",), 24: ("u",), 25: ("k",), 27: ("r",), 28: ("h",), 29: ("s",), 55: ("o",),
+           39: ("fg",), 49: ("bg",), 59: ("uc",)}
+COLOR_KEYS = {38: "fg", 48: "bg", 58: "uc"}
+MODE_DEFAULTS = {1: False, 7: True, 25: True, 1000: False, 1002: False, 1003: False, 1004: False, 1005: False,
+                 1006: False, 1015: False, 1016: False, 2004: False}
+TOKEN = re.compile(r"\x1b\[([<=>?]?)([0-9:;]*)([ -/]*)([@-~])|\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)|"
+                   r"\x1b[P^_X][^\x1b]*\x1b\\|\x1b([()*+\-./#% ])(.)|\x1b(.)|"
+                   r"([^\x00-\x1f\x1b\x7f-\x9f]+)|([\x00-\x1f\x7f-\x9f])", re.S)
 
 
-class Screen:
-    """Just enough of a terminal to show a session's last lines in the app's list."""
-    TOKENS = re.compile(r"\x1b\[([0-9;?<>=!]*)[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|"
-                        r"\x1b[P^_][^\x1b]*(?:\x1b\\)?|\x1b.?|[\x00-\x1f\x7f]|[^\x00-\x1f\x1b\x7f]+", re.S)
+def cwidth(ch):
+    o = ord(ch)
+    if o < 0x300:
+        return 1
+    if o in (0x200B, 0x200C, 0x200D, 0xFE0E, 0xFE0F) or unicodedata.combining(ch) \
+            or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
+
+class Line:
+    __slots__ = ("ch", "at", "wrapped")
+
+    def __init__(self, cols, attr=""):
+        self.ch = [" "] * cols
+        self.at = [attr] * cols
+        self.wrapped = False
+
+    def split_at(self, x):
+        """Before inserting or deleting at x: don't leave half of a wide character behind."""
+        if 0 < x < len(self.ch) and self.ch[x] == "":
+            self.ch[x - 1] = self.ch[x] = " "
+
+    def text(self):
+        return "".join(self.ch).rstrip()
+
+    def blank(self, a, b, attr):
+        """Clears cells a..b-1, also clearing the other half of a wide character cut at either edge."""
+        ch = self.ch
+        a, b = max(a, 0), min(b, len(ch))
+        if a >= b:
+            return
+        if ch[a] == "" and a > 0:
+            ch[a - 1] = " "
+            self.at[a - 1] = attr
+        if b < len(ch) and ch[b] == "":
+            ch[b] = " "
+        ch[a:b] = [" "] * (b - a)
+        self.at[a:b] = [attr] * (b - a)
+
+    def serialize(self, full=False):
+        ch, at = self.ch, self.at
+        last = ch[-1]
+        if last and ord(last[0]) >= 0x1100 and cwidth(last[0]) == 2:  # half a wide character can't be drawn
+            ch = ch[:-1] + [" "]
+        first = at[0]
+        if at.count(first) == len(at):  # one style for the whole row: the common case, kept fast
+            text = "".join(ch)
+            if not first:
+                return text if full else text.rstrip(" ")
+            return f"\x1b[0;{first}m{text}\x1b[0m"
+        end = len(ch)
+        if not full:
+            while end and ch[end - 1] in (" ", "") and not at[end - 1]:
+                end -= 1
+        out, cur = [], ""
+        for i in range(end):
+            a = at[i]
+            if a != cur:
+                out.append(f"\x1b[0;{a}m" if a else "\x1b[0m")
+                cur = a
+            out.append(ch[i])
+        if cur:
+            out.append("\x1b[0m")
+        return "".join(out)
+
+
+class Buf:
     def __init__(self, cols, rows):
-        self.c, self.r = max(cols, 20), max(rows, 4)
-        self.rows = [[" "] * self.c for _ in range(self.r)]
-        self.x = self.y = 0
-        self.saved = (0, 0)
+        self.lines = [Line(cols) for _ in range(rows)]
+        self.saved = None  # DECSC: (x, y, pen, origin, charsets, gl)
 
-    def _nl(self):
-        if self.y < self.r - 1:
+
+class Term:
+    def __init__(self, cols, rows, reply=None):
+        self.cols, self.rows = max(cols, 2), max(rows, 2)
+        self.reply = reply  # answers queries (cursor position, device attributes); None = don't
+        self.dec = codecs.getincrementaldecoder("utf-8")("replace")
+        self.hold = ""
+        self.sb = collections.deque(maxlen=SCROLLBACK)
+        self.title = ""
+        self.bell = False
+        self.reset()
+
+    def reset(self):
+        self.main = Buf(self.cols, self.rows)
+        self.alt = Buf(self.cols, self.rows)
+        self.buf = self.main
+        self.x = self.y = 0
+        self.pending = False
+        self.top, self.bottom = 0, self.rows - 1
+        self.pen = {}
+        self.attr = self.erase = ""
+        self.modes = dict(MODE_DEFAULTS)
+        self.origin = self.insert = self.keypad = False
+        self.charsets = ["B", "B"]
+        self.gl = 0
+        self.cursor_style = 0
+        self.tabs = set(range(8, 1000, 8))
+        self.last = " "
+
+    # ---- input
+
+    def feed(self, data):
+        s = self.hold + self.dec.decode(data)
+        self.hold = ""
+        i = s.rfind("\x1b")
+        if i != -1 and not self._complete(s, i):
+            s, self.hold = s[:i], s[i:]
+            if len(self.hold) > 1 << 20:  # never terminated: give up on it
+                self.hold = ""
+        for m in TOKEN.finditer(s):
+            k = m.lastindex
+            if k == 9:
+                self.print_run(m.group(9))
+            elif k == 10:
+                self.control(m.group(10))
+            elif k == 4:
+                self.csi(m.group(1), m.group(2), m.group(3), m.group(4))
+            elif k == 5:
+                self.osc(m.group(5))
+            elif k == 7:
+                self.esc_designate(m.group(6), m.group(7))
+            elif k == 8:
+                self.esc(m.group(8))
+
+    @staticmethod
+    def _complete(s, i):
+        rest = s[i + 1:]
+        if not rest:
+            return False
+        k = rest[0]
+        if k == "[":
+            return any("\x40" <= c <= "\x7e" for c in rest[1:])
+        if k == "]":
+            return "\x07" in rest or "\x1b\\" in rest
+        if k in "P^_X":
+            return False  # its ST would be the last escape
+        if k in "()*+-./#% ":
+            return len(rest) >= 2
+        return True
+
+    # ---- printing
+
+    def print_run(self, run):
+        if self.charsets[self.gl] == "0":
+            run = run.translate(DEC_GRAPHICS)
+        if not (run.isascii() and not self.insert):
+            for ch in run:
+                self.put(ch)
+            return
+        cols, attr = self.cols, self.attr
+        while run:
+            if self.pending:
+                self._wrap()
+            line = self.buf.lines[self.y]
+            x = self.x
+            n = min(len(run), cols - x)
+            end = x + n
+            ch = line.ch
+            if ch[x] == "" and x:
+                ch[x - 1] = " "
+                line.at[x - 1] = attr
+            if end < cols and ch[end] == "":
+                ch[end] = " "
+            ch[x:end] = run[:n]
+            line.at[x:end] = [attr] * n
+            self.last = run[n - 1]
+            run = run[n:]
+            if end >= cols:
+                self.x = cols - 1
+                if self.modes[7]:
+                    self.pending = True
+                elif run:
+                    ch[cols - 1] = run[-1]
+                    run = ""
+            else:
+                self.x = end
+
+    def put(self, c):
+        w = cwidth(c)
+        cols = self.cols
+        if w == 0:
+            x = self.x if self.pending else self.x - 1
+            line = self.buf.lines[self.y]
+            if x >= 0:
+                if line.ch[x] == "" and x:
+                    x -= 1
+                line.ch[x] += c
+            return
+        if self.pending:
+            self._wrap()
+        if w == 2 and self.x == cols - 1:
+            if not self.modes[7]:
+                return
+            self._wrap()  # Termux leaves the last cell as it was
+        line = self.buf.lines[self.y]
+        x = self.x
+        if self.insert:
+            line.split_at(x)
+            line.ch[x:x] = [" "] * w
+            line.at[x:x] = [self.erase] * w
+            del line.ch[cols:], line.at[cols:]
+            if line.ch[-1] and cwidth(line.ch[-1][0]) == 2:
+                line.ch[-1] = " "
+        if line.ch[x] == "" and x:
+            line.ch[x - 1] = " "
+            line.at[x - 1] = self.attr
+        if x + w < cols and line.ch[x + w] == "":
+            line.ch[x + w] = " "
+        line.ch[x] = c
+        line.at[x] = self.attr
+        if w == 2:
+            line.ch[x + 1] = ""  # Termux leaves the right half's style as it was
+        self.last = c
+        self.x += w
+        if self.x >= cols:
+            self.x = cols - 1
+            self.pending = self.modes[7]
+
+    def _wrap(self):
+        self.x = 0
+        self.pending = False
+        # As Termux does: an automatic wrap at or below the region's bottom scrolls the region
+        if self.y < self.bottom:
+            self.buf.lines[self.y].wrapped = True
             self.y += 1
         else:
-            self.rows.pop(0)
-            self.rows.append([" "] * self.c)
+            if self.y == self.bottom:
+                self.buf.lines[self.y].wrapped = True
+            self.scroll_up(1, keep=True)
 
-    def _put(self, ch):
-        w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-        if self.x + w > self.c:
+    # ---- movement and scrolling
+
+    def index(self):
+        if self.y == self.bottom:
+            self.scroll_up(1, keep=True)
+        elif self.y < self.rows - 1:
+            self.y += 1
+
+    def scroll_up(self, n, keep=False):
+        lines, top, bottom = self.buf.lines, self.top, self.bottom
+        n = min(n, bottom - top + 1)
+        for _ in range(n):
+            old = lines.pop(top)
+            if keep and self.buf is self.main:  # as Termux: any region, not only one at the top
+                self.sb.append((old.serialize(full=old.wrapped), old.wrapped))
+            lines.insert(bottom, Line(self.cols, self.erase))
+
+    def scroll_down(self, n):
+        lines, top, bottom = self.buf.lines, self.top, self.bottom
+        for _ in range(min(n, bottom - top + 1)):
+            del lines[bottom]
+            lines.insert(top, Line(self.cols, self.erase))
+
+    def goto(self, x, y):
+        self.x = min(max(x, 0), self.cols - 1)
+        lo, hi = (self.top, self.bottom) if self.origin else (0, self.rows - 1)
+        self.y = min(max(y + (self.top if self.origin else 0), lo), hi)
+        self.pending = False
+
+    def control(self, c):
+        if c in "\n\x0b\x0c":
+            self.index()
+        elif c == "\r":
             self.x = 0
-            self._nl()
-        self.rows[self.y][self.x] = ch
-        if w == 2 and self.x + 1 < self.c:
-            self.rows[self.y][self.x + 1] = ""
-        self.x += w
+            self.pending = False
+        elif c == "\b":
+            if self.x:
+                self.x -= 1
+            elif self.y and self.buf.lines[self.y - 1].wrapped:  # back onto the line this one wrapped from
+                self.buf.lines[self.y - 1].wrapped = False
+                self.y -= 1
+                self.x = self.cols - 1
+            self.pending = False
+        elif c == "\t":
+            nxt = [t for t in self.tabs if t > self.x]
+            self.x = min(min(nxt) if nxt else self.cols - 1, self.cols - 1)
+        elif c == "\x07":
+            self.bell = True
+        elif c == "\x0e":
+            self.gl = 1
+        elif c == "\x0f":
+            self.gl = 0
 
-    def feed(self, text):
-        for m in self.TOKENS.finditer(text):
-            t = m.group(0)
-            if m.group(2):
-                ps = [int(p) if p.isdigit() else 0 for p in m.group(1).lstrip("?<>=!").split(";")]
-                n = ps[0] or 1
-                f = m.group(2)
-                if f in "Hf":
-                    self.y = min(max((ps[0] or 1) - 1, 0), self.r - 1)
-                    self.x = min(max(((ps[1] if len(ps) > 1 else 0) or 1) - 1, 0), self.c - 1)
-                elif f == "A":
-                    self.y = max(self.y - n, 0)
-                elif f == "B":
-                    self.y = min(self.y + n, self.r - 1)
-                elif f == "C":
-                    self.x = min(self.x + n, self.c - 1)
-                elif f == "D":
-                    self.x = max(self.x - n, 0)
-                elif f == "G":
-                    self.x = min(n - 1, self.c - 1)
-                elif f == "d":
-                    self.y = min(n - 1, self.r - 1)
-                elif f == "J":
-                    if ps[0] == 0:
-                        self.rows[self.y][self.x:] = [" "] * (self.c - self.x)
-                        for r in range(self.y + 1, self.r):
-                            self.rows[r] = [" "] * self.c
-                    elif ps[0] == 1:
-                        for r in range(self.y):
-                            self.rows[r] = [" "] * self.c
-                    else:
-                        self.rows = [[" "] * self.c for _ in range(self.r)]
-                elif f == "K":
-                    row = self.rows[self.y]
-                    if ps[0] == 0:
-                        row[self.x:] = [" "] * (self.c - self.x)
-                    elif ps[0] == 1:
-                        row[:self.x + 1] = [" "] * (self.x + 1)
-                    else:
-                        self.rows[self.y] = [" "] * self.c
-                elif f == "X":
-                    row = self.rows[self.y]
-                    for i in range(self.x, min(self.x + n, self.c)):
-                        row[i] = " "
-                elif f in "hl" and m.group(1).startswith("?") and ALT_MODES & set(ps):
-                    self.rows = [[" "] * self.c for _ in range(self.r)]
-                    self.x = self.y = 0
-            elif t == "\r":
-                self.x = 0
-            elif t == "\n":
-                self._nl()
-            elif t == "\b":
-                self.x = max(self.x - 1, 0)
-            elif t == "\t":
-                self.x = min((self.x // 8 + 1) * 8, self.c - 1)
-            elif t == "\x1b7":
-                self.saved = (self.x, self.y)
-            elif t == "\x1b8":
-                self.x, self.y = self.saved
-            elif t[0] not in "\x1b\x00\x07\x7f" and ord(t[0]) >= 0x20:
-                for ch in t:
-                    self._put(ch)
+    def esc(self, c):
+        if c == "7":
+            self.save_cursor()
+        elif c == "8":
+            self.restore_cursor()
+        elif c == "D":
+            self.index()
+        elif c == "E":
+            self.x = 0
+            self.pending = False
+            self.index()
+        elif c == "M":
+            if self.y <= self.top:  # as Termux: above the region too
+                self.scroll_down(1)
+            else:
+                self.y -= 1
+            self.pending = False
+        elif c == "H":
+            self.tabs.add(self.x)
+        elif c == "F":
+            self.x, self.y, self.pending = 0, self.bottom, False
+        elif c == "c":
+            sb = self.sb
+            self.reset()
+            self.sb = sb
+        elif c == "=":
+            self.keypad = True
+        elif c == ">":
+            self.keypad = False
 
-    def last_lines(self, n=2):
-        lines = ["".join(r).rstrip() for r in self.rows]
+    def esc_designate(self, k, c):
+        if k == "(":
+            self.charsets[0] = c
+        elif k == ")":
+            self.charsets[1] = c
+        elif k == "#" and c == "8":
+            for line in self.buf.lines:
+                line.ch[:] = ["E"] * self.cols
+                line.at[:] = [""] * self.cols
+
+    def save_cursor(self):
+        self.buf.saved = (self.x, self.y, dict(self.pen), self.origin, list(self.charsets), self.gl, self.modes[7])
+
+    def restore_cursor(self):
+        s = self.buf.saved or (0, 0, {}, False, ["B", "B"], 0, True)
+        self.x, self.y = min(s[0], self.cols - 1), min(s[1], self.rows - 1)
+        self.pen = dict(s[2])
+        self._pen_changed()
+        self.origin, self.charsets, self.gl, self.modes[7] = s[3], list(s[4]), s[5], s[6]
+        self.pending = False
+
+    def osc(self, body):
+        num, _, text = body.partition(";")
+        if num in ("0", "2"):
+            self.title = text
+
+    # ---- CSI
+
+    def csi(self, priv, params, inter, f):
+        toks = params.split(";") if params else []
+        nums = []
+        for t in toks:
+            head = t.split(":", 1)[0]
+            nums.append(int(head) if head.isdigit() else 0)
+
+        def p(i, d=1):
+            v = nums[i] if i < len(nums) else 0
+            return v or d
+
+        if inter:
+            if inter == " " and f == "q":
+                self.cursor_style = p(0, 0)
+            elif inter == "!" and f == "p":
+                self.soft_reset()
+            return
+        if priv == "?":
+            if f in "hl":
+                for n in nums:
+                    self.dec_mode(n, f == "h")
+            elif f == "J":
+                self.erase_display(p(0, 0))
+            elif f == "K":
+                self.erase_line(p(0, 0))
+            return
+        if priv == ">":
+            if f == "c" and self.reply:
+                self.reply("\x1b[>41;320;0c")
+            return
+        if priv:
+            return
+        lines, y = self.buf.lines, self.y
+        if f in "HfABCDEFGa`de":
+            if f in "Hf":
+                self.goto(p(1) - 1, p(0) - 1)
+                return
+            # Same rules as Termux: up/down ignore the scroll region, CNL/CPL/VPR go through goto()
+            if f == "A":
+                self.y = max(y - p(0), 0)
+            elif f == "B":
+                self.y = min(y + p(0), self.rows - 1)
+            elif f in "Ca":
+                self.x = min(self.x + p(0), self.cols - 1)
+            elif f == "D":
+                self.x = max(self.x - p(0), 0)
+            elif f == "E":
+                self.goto(0, y + p(0))
+            elif f == "F":
+                self.goto(0, y - p(0))
+            elif f == "e":
+                self.goto(self.x, y + p(0))
+            elif f in "G`":
+                self.x = min(p(0), self.cols) - 1
+            elif f == "d":
+                self.y = min(p(0), self.rows) - 1
+            self.pending = False
+        elif f == "J":
+            self.erase_display(p(0, 0))
+        elif f == "K":
+            self.erase_line(p(0, 0))
+        elif f == "X":
+            lines[y].blank(self.x, self.x + p(0), self.erase)
+            self.pending = False
+        elif f == "@":
+            line, n = lines[y], min(p(0), self.cols - self.x)
+            line.split_at(self.x)
+            line.ch[self.x:self.x] = [" "] * n
+            line.at[self.x:self.x] = [self.erase] * n
+            del line.ch[self.cols:], line.at[self.cols:]
+            if line.ch[-1] and cwidth(line.ch[-1][0]) == 2:
+                line.ch[-1] = " "
+            self.pending = False
+        elif f == "P":
+            line, n = lines[y], min(p(0), self.cols - self.x)
+            line.split_at(self.x)
+            line.split_at(self.x + n)
+            del line.ch[self.x:self.x + n], line.at[self.x:self.x + n]
+            line.ch += [" "] * n
+            line.at += [self.erase] * n
+            if line.ch[self.x] == "":
+                line.ch[self.x] = " "
+            self.pending = False
+        elif f in "LM":
+            if y <= self.bottom:  # Termux doesn't check the region's top
+                n = min(p(0), self.bottom - y + 1)
+                for _ in range(n):
+                    if f == "L":
+                        del lines[self.bottom]
+                        lines.insert(y, Line(self.cols, self.erase))
+                    else:
+                        del lines[y]
+                        lines.insert(self.bottom, Line(self.cols, self.erase))
+                self.pending = False  # Termux leaves the column alone
+        elif f == "S":
+            self.scroll_up(p(0), keep=True)
+        elif f == "T" and len(nums) <= 1:
+            self.scroll_down(p(0))
+        elif f == "b":
+            self.print_run(self.last * min(p(0), 65535)) if self.last.isascii() else [self.put(self.last) for _ in range(min(p(0), 4096))]
+        elif f == "m":
+            self.sgr(toks)
+        elif f == "r":
+            top, bottom = p(0) - 1, p(1, self.rows) - 1
+            bottom = min(bottom, self.rows - 1)
+            if top < bottom:
+                self.top, self.bottom = top, bottom
+                self.goto(0, 0)
+        elif f in "hl":
+            for n in nums:
+                if n == 4:
+                    self.insert = f == "h"
+        elif f == "g":
+            if p(0, 0) == 0:
+                self.tabs.discard(self.x)
+            elif p(0, 0) == 3:
+                self.tabs.clear()
+        elif f == "I":
+            for _ in range(p(0)):
+                self.control("\t")
+        elif f == "Z":
+            for _ in range(p(0)):
+                prev = [t for t in self.tabs if t < self.x]
+                self.x = max(prev) if prev else 0
+        elif f == "s" and not toks:
+            self.save_cursor()
+        elif f == "u" and not toks:
+            self.restore_cursor()
+        elif f == "n" and self.reply:
+            if p(0, 0) == 5:
+                self.reply("\x1b[0n")
+            elif p(0, 0) == 6:
+                row = self.y - (self.top if self.origin else 0)
+                self.reply(f"\x1b[{row + 1};{self.x + 1}R")
+        elif f == "c" and self.reply and p(0, 0) == 0:
+            self.reply("\x1b[?64;1;2;6;9;15;18;21;22c")
+
+    def erase_display(self, mode):
+        lines, y = self.buf.lines, self.y
+        if mode == 0:
+            lines[y].blank(self.x, self.cols, self.erase)
+            for line in lines[y + 1:]:
+                line.blank(0, self.cols, self.erase)
+        elif mode == 1:
+            for line in lines[:y]:
+                line.blank(0, self.cols, self.erase)
+            lines[y].blank(0, self.x + 1, self.erase)
+        elif mode == 2:
+            for line in lines:
+                line.blank(0, self.cols, self.erase)
+        elif mode == 3:
+            self.sb.clear()
+        self.pending = False
+
+    def erase_line(self, mode):
+        line = self.buf.lines[self.y]
+        # Like Termux, erasing keeps the line's wrap flag (a backspace at column 0 still follows it)
+        if mode == 0:
+            line.blank(self.x, self.cols, self.erase)
+        elif mode == 1:
+            line.blank(0, self.x + 1, self.erase)
+        elif mode == 2:
+            line.blank(0, self.cols, self.erase)
+        self.pending = False
+
+    def dec_mode(self, n, on):
+        if n in self.modes:
+            self.modes[n] = on
+        elif n == 6:
+            self.origin = on
+            self.goto(0, 0)
+        elif n in (47, 1047, 1049):
+            if on == (self.buf is self.alt):
+                return
+            if on:
+                if n == 1049:
+                    self.save_cursor()
+                self.buf = self.alt
+                if n != 47:
+                    for line in self.alt.lines:
+                        line.blank(0, self.cols, self.erase)
+                        line.wrapped = False
+            else:
+                if n == 1047:
+                    for line in self.alt.lines:
+                        line.blank(0, self.cols, self.erase)
+                self.buf = self.main
+                if n == 1049:
+                    self.restore_cursor()
+            self.pending = False
+        elif n == 1048:
+            self.save_cursor() if on else self.restore_cursor()
+
+    def soft_reset(self):
+        self.modes[7], self.modes[25], self.modes[1] = True, True, False
+        self.origin = self.insert = self.keypad = False
+        self.top, self.bottom = 0, self.rows - 1
+        self.pen = {}
+        self._pen_changed()
+        self.charsets, self.gl = ["B", "B"], 0
+        self.buf.saved = None
+
+    # ---- SGR
+
+    def sgr(self, toks):
+        pen = self.pen
+        if not toks:
+            toks = ["0"]
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            if ":" in t:
+                sub = t.split(":")
+                n = int(sub[0]) if sub[0].isdigit() else -1
+                if n in COLOR_KEYS and len(sub) > 2:
+                    vals = [int(v) if v.isdigit() else 0 for v in sub[1:]]
+                    if vals[0] == 5:
+                        pen[COLOR_KEYS[n]] = f"{n};5;{vals[1]}"
+                    elif vals[0] == 2 and len(vals) >= 4:
+                        r, g, b = vals[-3:]
+                        pen[COLOR_KEYS[n]] = f"{n};2;{r};{g};{b}"
+                elif n == 4:
+                    style = int(sub[1]) if sub[1].isdigit() else 1
+                    if style:
+                        pen["u"] = "4" if style == 1 else f"4:{style}"
+                    else:
+                        pen.pop("u", None)
+                i += 1
+                continue
+            n = int(t) if t.isdigit() else 0
+            if n == 0:
+                pen.clear()
+            elif n in PEN_FLAGS:
+                pen[PEN_FLAGS[n]] = str(n)
+            elif n in (4, 21):
+                pen["u"] = str(n)
+            elif n in PEN_OFF:
+                for k in PEN_OFF[n]:
+                    pen.pop(k, None)
+            elif 30 <= n <= 37 or 90 <= n <= 97:
+                pen["fg"] = str(n)
+            elif 40 <= n <= 47 or 100 <= n <= 107:
+                pen["bg"] = str(n)
+            elif n in COLOR_KEYS and i + 1 < len(toks):
+                kind = toks[i + 1]
+                if kind == "5" and i + 2 < len(toks):
+                    pen[COLOR_KEYS[n]] = f"{n};5;{int(toks[i + 2] or 0)}"
+                    i += 2
+                elif kind == "2" and i + 4 < len(toks):
+                    r, g, b = (int(v or 0) for v in toks[i + 2:i + 5])
+                    pen[COLOR_KEYS[n]] = f"{n};2;{r};{g};{b}"
+                    i += 4
+                else:
+                    i += 1
+            i += 1
+        self._pen_changed()
+
+    def _pen_changed(self):
+        pen = self.pen
+        self.attr = ";".join(pen[k] for k in PEN_ORDER if k in pen)
+        self.erase = self.attr  # Termux erases with the whole current style, not only the background
+
+    # ---- resize
+
+    def resize(self, cols, rows):
+        cols, rows = max(cols, 2), max(rows, 2)
+        if (cols, rows) == (self.cols, self.rows):
+            return
+        on_alt = self.buf is self.alt
+        if on_alt:
+            self.x, self.y = self._crop(self.alt, cols, rows, self.x, self.y)
+            ms = self.main.saved
+            mx, my = (ms[0], ms[1]) if ms else (0, 0)
+            mx, my = self._reflow(cols, rows, mx, my)
+            if ms:
+                self.main.saved = (mx, my) + ms[2:]
+        else:
+            self.x, self.y = self._reflow(cols, rows, self.x, self.y)
+            s = self.alt.saved
+            self._crop(self.alt, cols, rows, 0, 0)
+            if s:
+                self.alt.saved = (min(s[0], cols - 1), min(s[1], rows - 1)) + s[2:]
+        self.cols, self.rows = cols, rows
+        self.top, self.bottom = 0, rows - 1
+        self.pending = False
+
+    @staticmethod
+    def _fit(line, cols):
+        n = len(line.ch)
+        if n > cols:
+            del line.ch[cols:], line.at[cols:]
+            if line.ch[cols - 1] and cwidth(line.ch[cols - 1][0]) == 2:
+                line.ch[cols - 1] = " "
+        elif n < cols:
+            line.ch += [" "] * (cols - n)
+            line.at += [""] * (cols - n)
+
+    def _crop(self, buf, cols, rows, x, y):
+        for line in buf.lines:
+            self._fit(line, cols)
+            line.wrapped = False
+        lines = buf.lines
+        while len(lines) > rows:
+            if y < len(lines) - 1:
+                lines.pop()
+            else:
+                lines.pop(0)
+                y -= 1
+        while len(lines) < rows:
+            lines.append(Line(cols))
+        return min(x, cols - 1), min(max(y, 0), rows - 1)
+
+    def _reflow(self, cols, rows, cx, cy):
+        lines = self.main.lines
+        last = len(lines) - 1
+        while last > cy and not lines[last].text() and not any(lines[last].at):
+            last -= 1
+        logical, cur = [], None
+        acc_ch, acc_at = [], []
+        for i, line in enumerate(lines[:last + 1]):
+            if i == cy:
+                cur = (len(logical), len(acc_ch) + cx)
+            ch, at = line.ch, line.at
+            if line.wrapped:
+                end = len(ch)
+                nxt = lines[i + 1] if i + 1 < len(lines) else None
+                if ch[-1] == " " and not at[-1] and nxt and len(nxt.ch) > 1 and nxt.ch[1] == "":
+                    end -= 1  # padding left when a wide character wrapped early
+                acc_ch += ch[:end]
+                acc_at += at[:end]
+                continue
+            end = len(ch)
+            while end and ch[end - 1] in (" ", "") and not at[end - 1]:
+                end -= 1
+            acc_ch += ch[:end]
+            acc_at += at[:end]
+            logical.append((acc_ch, acc_at))
+            acc_ch, acc_at = [], []
+        if acc_ch:
+            logical.append((acc_ch, acc_at))
+        out, ny, nx = [], 0, 0
+        for li, (ch, at) in enumerate(logical):
+            starts = []
+            pos, n = 0, len(ch)
+            while True:
+                take = min(cols, n - pos)
+                if pos + take < n and take and ch[pos + take] == "":
+                    take -= 1
+                line = Line(cols)
+                line.ch[:take] = ch[pos:pos + take]
+                line.at[:take] = at[pos:pos + take]
+                starts.append(pos)
+                pos += take
+                line.wrapped = pos < n
+                out.append(line)
+                if pos >= n or not take:
+                    break
+            if cur and cur[0] == li:
+                off = cur[1]
+                r = max(k for k, s in enumerate(starts) if s <= off) if off else 0
+                ny, nx = len(out) - len(starts) + r, min(off - starts[r], cols - 1)
+        if cur is None:
+            ny, nx = len(out), 0
+        excess = len(out) - rows
+        if excess > 0:
+            top = min(excess, ny)
+            for line in out[:top]:
+                self.sb.append((line.serialize(full=line.wrapped), line.wrapped))
+            out = out[top:top + rows]
+            ny -= top
+        while len(out) < rows:
+            out.append(Line(cols))
+        self.main.lines = out
+        return nx, min(ny, rows - 1)
+
+    # ---- snapshot
+
+    def snapshot(self):
+        """Escape sequences that rebuild this terminal's history, screen and state on a freshly reset terminal."""
+        parts = ["\x1b[0m\x1b[H\x1b[2J"]
+        sb, used, start = self.sb, 0, len(self.sb)
+        while start and used + len(sb[start - 1][0]) + 2 <= SNAPSHOT_BUDGET:
+            start -= 1
+            used += len(sb[start][0]) + 2
+        rows = [sb[i] for i in range(start, len(sb))]
+        rows += [(line.serialize(full=line.wrapped), line.wrapped) for line in self.main.lines]
+        for i, (text, wrapped) in enumerate(rows):
+            parts.append(text)
+            # A wrapped row continues by itself once the next row prints; an empty next row needs a newline
+            if i < len(rows) - 1 and not (wrapped and rows[i + 1][0]):
+                parts.append("\r\n")
+        cup = lambda x, y: f"\x1b[{y + 1};{x + 1}H"
+        if self.buf is self.alt:
+            ms = self.main.saved
+            parts.append(cup(ms[0], ms[1]) if ms else cup(0, 0))
+            parts.append("\x1b[?1049h\x1b[H\x1b[2J")
+            prev_wrapped = False
+            for i, line in enumerate(self.alt.lines):
+                text = line.serialize(full=line.wrapped)
+                if text:
+                    parts.append(text if prev_wrapped else cup(0, i) + text)
+                prev_wrapped = line.wrapped and bool(text)
+        s = self.buf.saved
+        if s:
+            pen = ";".join(s[2][k] for k in PEN_ORDER if k in s[2])
+            wrap_off = "" if s[6] else "\x1b[?7l"
+            parts.append(cup(s[0], s[1]) + f"\x1b[0;{pen}m{wrap_off}\x1b7\x1b[0m" + ("\x1b[?7h" if wrap_off else ""))
+        if (self.top, self.bottom) != (0, self.rows - 1):
+            parts.append(f"\x1b[{self.top + 1};{self.bottom + 1}r")
+        if self.tabs != set(range(8, 1000, 8)):
+            parts.append("\x1b[3g" + "".join(cup(t, 0) + "\x1bH" for t in sorted(self.tabs) if t < self.cols))
+        for n, on in self.modes.items():
+            if on != MODE_DEFAULTS[n]:
+                parts.append(f"\x1b[?{n}{'h' if on else 'l'}")
+        if self.insert:
+            parts.append("\x1b[4h")
+        if self.keypad:
+            parts.append("\x1b=")
+        if self.charsets != ["B", "B"]:
+            parts.append(f"\x1b({self.charsets[0]}\x1b){self.charsets[1]}")
+        if self.gl:
+            parts.append("\x0e")
+        if self.cursor_style:
+            parts.append(f"\x1b[{self.cursor_style} q")
+        if self.origin:
+            parts.append("\x1b[?6h")
+        oy = self.top if self.origin else 0
+        line = self.buf.lines[self.y]
+        cell = line.ch[self.x]
+        if self.pending and cell and cwidth(cell[0]) == 1:
+            # Rewrite the last cell so the terminal is left waiting to wrap, as this one is
+            a = line.at[self.x]
+            parts.append(cup(self.x, self.y - oy) + (f"\x1b[0;{a}m" if a else "\x1b[0m") + cell)
+        else:
+            parts.append(cup(self.x, self.y - oy))
+        parts.append(f"\x1b[0;{self.attr}m" if self.attr else "\x1b[0m")
+        parts.append(REPLAY_DONE)
+        return "".join(parts)
+
+    def preview(self, n=2):
+        lines = [line.text() for line in self.buf.lines]
         return [l for l in lines if l.strip()][-n:]
 
 
@@ -471,56 +1172,44 @@ class Sess:
         self.id, self.name, self.master, self.pid, self.cwd = sid, name, master, pid, cwd
         self.cols, self.rows = cols, rows
         self.created = self.activity = int(time.time())
-        self.main, self.alt, self.alt_on = bytearray(), bytearray(), False
-        self.modes = {}
-        self.hold = b""
+        self.term = Term(cols, rows)
+        self.backlog = bytearray()
         self.inbuf = bytearray()
         self.clients = []
         self.last_bell = 0
 
     def record(self, data):
+        """Output already sent to the clients; the emulator catches up in catch_up()."""
         self.activity = int(time.time())
-        buf = self.hold + data
-        cut = len(buf)
-        esc = buf.rfind(b"\x1b", max(0, len(buf) - 512))
-        if esc != -1 and not _complete_escape(buf, esc):
-            cut = esc
-        self.hold, buf = buf[cut:], buf[:cut]
-        if len(self.hold) > 4096:
-            buf, self.hold = buf + self.hold, b""
-        pos = 0
-        for m in MODE_RE.finditer(buf):
-            nums = {int(p) for p in m.group(1).split(b";") if p.isdigit()}
-            on = m.group(2) == b"h"
-            if nums & ALT_MODES:
-                (self.alt if self.alt_on else self.main).extend(buf[pos:m.start()])
-                self.alt_on = on
-                self.alt = bytearray()
-                pos = m.end()
-            for n in nums - ALT_MODES:
-                self.modes[n] = on
-        (self.alt if self.alt_on else self.main).extend(buf[pos:])
-        for log in (self.main, self.alt):
-            if len(log) > LOG_CAP:
-                del log[:len(log) - LOG_CAP]
-        if b"\x07" in OSC_RE.sub(b"", buf) and time.time() - self.last_bell > 5:
-            self.last_bell = time.time()
-            try:
-                append_event("bell", self.name, "moor", self.current_cwd(), "")
-            except Exception:
-                pass
+        self.backlog += data
+        if len(self.backlog) > BACKLOG_MAX:
+            del self.backlog[:len(self.backlog) - BACKLOG_KEEP]
+            self.term.hold = ""
 
-    def replay(self):
-        main = bytes(self.main)
-        if len(main) >= LOG_CAP:  # trimmed: start at a line boundary
-            main = main[main.find(b"\n") + 1:]
-        out = bytearray(main)
-        if self.alt_on:
-            out += b"\x1b[?1049h\x1b[H\x1b[2J" + self.alt
-        for n in TRACKED_MODES:
-            if n in self.modes:
-                out += b"\x1b[?%d%s" % (n, b"h" if self.modes[n] else b"l")
-        return bytes(out) + REPLAY_DONE
+    def catch_up(self, budget=None):
+        """Feeds pending output to the emulator, for at most budget seconds (None = all of it)."""
+        end = None if budget is None else time.time() + budget
+        while self.backlog and (end is None or time.time() < end):
+            chunk = bytes(self.backlog[:16384])
+            del self.backlog[:16384]
+            self.term.feed(chunk)
+        if self.term.bell:
+            self.term.bell = False
+            if time.time() - self.last_bell > 5:
+                self.last_bell = time.time()
+                try:
+                    append_event("bell", self.name, "moor", self.current_cwd(), "")
+                except Exception:
+                    pass
+
+    def resize(self, cols, rows):
+        self.catch_up()
+        self.cols, self.rows = cols, rows
+        self.term.resize(cols, rows)
+
+    def snapshot(self):
+        self.catch_up()
+        return self.term.snapshot().encode()
 
     def fg_pid(self):
         try:
@@ -546,9 +1235,19 @@ class Sess:
             return self.cwd
 
     def preview(self):
-        s = Screen(self.cols, self.rows)
-        s.feed(bytes((self.alt if self.alt_on else self.main)[-24 * 1024:]).decode("utf-8", "replace"))
-        return s.last_lines()
+        self.catch_up()
+        return self.term.preview()
+
+
+def fit_size(cols, rows, s):
+    """A client's terminal size; an unknown one (0) keeps the session's, and tiny ones are raised (zsh crashes)."""
+    try:
+        cols, rows = int(cols or 0), int(rows or 0)
+    except (TypeError, ValueError):
+        return s.cols, s.rows
+    if cols <= 0 or rows <= 0:
+        return s.cols, s.rows
+    return max(cols, 10), max(rows, 3)
 
 
 class Daemon:
@@ -629,6 +1328,8 @@ class Daemon:
                 os._exit(127)
         os.set_blocking(master, False)
         s = Sess(sid, name, master, pid, cwd, cols, rows)
+        # Nobody attached: answer the program's terminal queries ourselves, or it may wait for a reply
+        s.term.reply = lambda r: None if s.clients else self.type_into(s, r.encode())
         self.sessions[name] = s
         self.watch(master, ("pty", s))
         if cmd:
@@ -670,20 +1371,16 @@ class Daemon:
         except OSError:
             pass
 
-    def redraw(self, s):
-        """Full-screen programs repaint only on SIGWINCH: shrink by a row, then restore."""
-        if s.rows < 2:
-            return
-        self.winsize(s, s.cols, s.rows - 1)
-        self.timers.append((time.time() + 0.15, lambda: s.name in self.sessions and self.winsize(s, s.cols, s.rows)))
-
     # -- requests
 
     def handle(self, conn, req):
         op = req.get("op")
         reply = lambda d: self.send(conn, (json.dumps(d) + "\n").encode())
         if op == "hello":
-            reply({"ok": True, "v": PROTO, "sessions": len(self.sessions)})
+            reply({"ok": True, "v": PROTO, "code": CODE_ID, "sessions": len(self.sessions)})
+        elif op == "upgrade":
+            reply({"ok": True})
+            self.timers.append((time.time() + 0.05, self.upgrade))
         elif op == "list":
             items = []
             for s in self.sessions.values():
@@ -730,13 +1427,11 @@ class Daemon:
             reply({"ok": True})
             conn["sess"] = s
             s.clients.append(conn)
-            self.send(conn, s.replay())
-            cols, rows = int(req.get("cols", s.cols)), int(req.get("rows", s.rows))
+            cols, rows = fit_size(req.get("cols"), req.get("rows"), s)
             if (cols, rows) != (s.cols, s.rows):
-                s.cols, s.rows = cols, rows
+                s.resize(cols, rows)
                 self.winsize(s, cols, rows)
-            elif s.alt_on or s.command() not in SHELL_NAMES:
-                self.redraw(s)
+            self.send(conn, s.snapshot())
         else:
             reply({"ok": False, "error": "unknown request"})
 
@@ -774,34 +1469,40 @@ class Daemon:
             elif kind == b"R":
                 try:
                     size = json.loads(payload)
-                    s.cols, s.rows = max(int(size["cols"]), 2), max(int(size["rows"]), 2)
-                    self.winsize(s, s.cols, s.rows)
+                    cols, rows = fit_size(size.get("cols"), size.get("rows"), s)
+                    if (cols, rows) != (s.cols, s.rows):
+                        s.resize(cols, rows)
+                        self.winsize(s, cols, rows)
                 except (ValueError, KeyError, OSError):
                     pass
 
     # -- loop
 
-    def run(self):
+    def run(self, resume=None):
         import signal
         import socket as sk
-        STATE.mkdir(parents=True, exist_ok=True)
-        lock = open(STATE / "daemon.lock", "w")
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            return  # another daemon is running
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-        SOCK.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        try:
-            SOCK.unlink()
-        except FileNotFoundError:
-            pass
-        old = os.umask(0o077)
-        srv = sk.socket(sk.AF_UNIX, sk.SOCK_STREAM)
-        srv.bind(str(SOCK))
-        os.umask(old)
-        srv.listen(16)
+        if resume:
+            srv = self.resume(resume)
+        else:
+            STATE.mkdir(parents=True, exist_ok=True)
+            self.lock = open(STATE / "daemon.lock", "w")
+            try:
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return  # another daemon is running
+            SOCK.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            try:
+                SOCK.unlink()
+            except FileNotFoundError:
+                pass
+            old = os.umask(0o077)
+            srv = sk.socket(sk.AF_UNIX, sk.SOCK_STREAM)
+            srv.bind(str(SOCK))
+            os.umask(old)
+            srv.listen(16)
+        self.srv = srv
         srv.setblocking(False)
         self.sel.register(srv, self.EVENT_READ, ("listen", None))
         while True:
@@ -814,6 +1515,8 @@ class Daemon:
                 except OSError:
                     pass
             timeout = min([t[0] for t in self.timers], default=now + 5) - now
+            if any(s.backlog for s in self.sessions.values()):
+                timeout = 0
             for key, ev in self.sel.select(max(timeout, 0)):
                 kind, obj = key.data
                 if kind == "listen":
@@ -828,6 +1531,9 @@ class Daemon:
                     self.on_pty(obj, ev)
                 else:
                     self.on_conn(obj, ev)
+            for s in list(self.sessions.values()):
+                if s.backlog:
+                    s.catch_up(0.02)  # in slices, so output keeps flowing to the clients meanwhile
             for pid in list(self.dead):
                 try:
                     if os.waitpid(pid, os.WNOHANG)[0]:
@@ -843,6 +1549,76 @@ class Daemon:
                 except ChildProcessError:
                     pass
 
+    # -- upgrade in place
+
+    def upgrade(self):
+        """Runs the helper's current code in this same process, keeping every session: the terminals, the listening
+        socket, the lock and attached clients stay open across exec(), the screens travel as snapshots, and the
+        sessions' programs stay this process's children."""
+        state = {"next_id": self.next_id, "listen": self.srv.fileno(), "lock": self.lock.fileno(),
+                 "dead": sorted(self.dead), "sessions": [], "clients": []}
+        keep = [self.srv.fileno(), self.lock.fileno()]
+        for s in self.sessions.values():
+            state["sessions"].append({
+                "id": s.id, "name": s.name, "master": s.master, "pid": s.pid, "cwd": s.cwd, "cols": s.cols,
+                "rows": s.rows, "created": s.created, "activity": s.activity, "last_bell": s.last_bell,
+                "exited": getattr(s, "exited", False), "inbuf": base64.b64encode(bytes(s.inbuf)).decode(),
+                "screen": s.snapshot().decode("utf-8", "replace"), "title": s.term.title})
+            keep.append(s.master)
+            for c in s.clients:
+                sock = c["sock"]
+                try:  # deliver what is queued; the new code starts with empty buffers
+                    sock.setblocking(True)
+                    sock.settimeout(1)
+                    sock.sendall(bytes(c["out"]))
+                except OSError:
+                    continue
+                state["clients"].append({"fd": sock.fileno(), "session": s.name,
+                                         "in": base64.b64encode(bytes(c["in"])).decode()})
+                keep.append(sock.fileno())
+        path = STATE / "daemon.resume"
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f)
+        for k in keep:
+            os.set_inheritable(k, True)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execv(sys.executable, [sys.executable, str(pathlib.Path(__file__).resolve()), "daemon", "--resume", str(path)])
+
+    def resume(self, path):
+        import socket as sk
+        with open(path) as f:
+            state = json.load(f)
+        os.unlink(path)
+        self.lock = os.fdopen(state["lock"], "w")
+        self.next_id = state["next_id"]
+        self.dead = set(state.get("dead", []))
+        for d in state["sessions"]:
+            s = Sess(d["id"], d["name"], d["master"], d["pid"], d["cwd"], d["cols"], d["rows"])
+            s.created, s.activity, s.last_bell = d["created"], d["activity"], d["last_bell"]
+            s.term.feed(d["screen"].encode())
+            s.term.title = d.get("title", "")
+            s.term.reply = lambda r, s=s: None if s.clients else self.type_into(s, r.encode())
+            os.set_blocking(s.master, False)
+            self.sessions[s.name] = s
+            self.watch(s.master, ("pty", s))
+            if d.get("inbuf"):
+                self.type_into(s, base64.b64decode(d["inbuf"]))
+            if d.get("exited"):
+                self.timers.append((time.time() + 0.5, lambda s=s: s.name in self.sessions and self.end(s)))
+        for d in state["clients"]:
+            s = self.sessions.get(d["session"])
+            sock = sk.socket(fileno=d["fd"])
+            if not s:
+                sock.close()
+                continue
+            sock.setblocking(False)
+            conn = {"sock": sock, "in": bytearray(base64.b64decode(d["in"])), "out": bytearray(), "sess": s}
+            s.clients.append(conn)
+            self.watch(sock, ("conn", conn))
+        return sk.socket(fileno=state["listen"])
+
     def on_pty(self, s, ev):
         if ev & self.EVENT_READ:
             try:
@@ -855,9 +1631,9 @@ class Daemon:
                 self.end(s)
                 return
             if data:
-                s.record(data)
                 for c in list(s.clients):
                     self.send(c, data)
+                s.record(data)
         if ev & self.EVENT_WRITE and s.inbuf:
             try:
                 n = os.write(s.master, s.inbuf)
@@ -928,13 +1704,28 @@ def daemon_conn(start=True):
             return None
         return start_daemon()
     hello = request_on(c, {"op": "hello"})
-    if hello.get("v") != PROTO and not hello.get("sessions"):
+    if hello.get("v") == PROTO and hello.get("code") == CODE_ID:
+        return connect()
+    if not hello.get("sessions"):  # idle: replace it
         try:
             request_on(connect(), {"op": "quit"})
         except OSError:
             pass
         time.sleep(0.4)
         return start_daemon()
+    if hello.get("v", 1) >= 2:  # sessions running: it swaps its code in place and keeps them
+        try:
+            request_on(connect(), {"op": "upgrade"})
+            for _ in range(60):
+                time.sleep(0.05)
+                try:
+                    if request_on(connect(), {"op": "hello"}).get("code") == CODE_ID:
+                        break
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    # A first-generation daemon can't upgrade itself; it keeps serving until its sessions end
     return connect()
 
 
@@ -1069,7 +1860,7 @@ def main():
     elif a[:1] == ["hooks"] and len(a) == 2 and a[1] in ("install", "uninstall", "status"):
         hooks(a[1])
     elif a[:1] == ["daemon"]:
-        Daemon().run()
+        Daemon().run(resume=a[2] if a[1:2] == ["--resume"] and len(a) > 2 else None)
     elif a[:1] == ["ls"]:
         cmd_ls()
     elif a[:1] == ["attach"] and len(a) == 2:
