@@ -319,8 +319,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     // Portrait: one row of common keys; swipe up on a key for the small label in its corner;
     // the last key opens a sheet with symbols, Ctrl combos and actions. Wide screens get more keys in the row.
 
-    private static final String[] MAIN = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "🎤", "⌨", "⋯"};
-    private static final String[] WIDE = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→",
+    private static final String[] MAIN = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "⏎", "🎤", "⌨", "⋯"};
+    private static final String[] WIDE = {"ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "⏎",
         "HOME", "END", "PGUP", "PGDN", "/", "-", "|", "~", "🎤", "⌨", "⋯"};
     private static final String[][] SYMBOLS = {
         {"/", "-", "_", "|", "~", "`", "=", "\\", "$", "&"},
@@ -384,8 +384,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         cell.addView(b, new FrameLayout.LayoutParams(-1, -1));
         String up = UP.get(k);
         if (up != null) {
-            TextView hint = Ui.text(this, up.equals("⇧TAB") ? "⇧" : up, 8, t.faint, Ui.REGULAR);
-            hint.setPadding(0, dp(2), dp(4), 0);
+            TextView hint = Ui.text(this, up.equals("⇧TAB") ? "⇧" : up, 7.5f, t.faint, Ui.REGULAR);
+            hint.setPadding(0, dp(2), dp(3), 0);
+            hint.setSingleLine(true); // twelve keys leave little room: never wrap "HOME"
             cell.addView(hint, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END));
         }
         if (k.equals("CTRL")) ctrlKey = b;
@@ -609,6 +610,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         switch (k) {
             case "ESC": keyCode = KeyEvent.KEYCODE_ESCAPE; break;
             case "TAB": keyCode = KeyEvent.KEYCODE_TAB; break;
+            case "⏎": keyCode = KeyEvent.KEYCODE_ENTER; break;
             case "HOME": keyCode = KeyEvent.KEYCODE_MOVE_HOME; break;
             case "END": keyCode = KeyEvent.KEYCODE_MOVE_END; break;
             case "PGUP": keyCode = KeyEvent.KEYCODE_PAGE_UP; break;
