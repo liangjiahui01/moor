@@ -36,7 +36,7 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 
 ## 开始使用
 
-1. 从 [Releases](https://github.com/liangjiahui01/moor/releases) 下载安装 APK。
+1. 从 [Releases](https://github.com/liangjiahui01/moor/releases) 下载安装 APK。应用每天去那里查一次新版本，有就提示；设置 → 检查更新可以立即查。
 2. 在主机上安装辅助脚本：
 
    ```sh

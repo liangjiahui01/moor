@@ -205,6 +205,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     protected void onResume() {
         super.onResume();
+        Updates.checkDaily(this);
         if (Theme.get(this).dark != themeDark) {
             recreate();
             return;

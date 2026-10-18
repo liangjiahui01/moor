@@ -259,6 +259,12 @@ public class SettingsActivity extends Activity {
         page.addView(keys);
         page.addView(hint(getString(R.string.key_hint)));
 
+        // ---- about ----
+        section(R.string.sec_about);
+        LinearLayout ab = card();
+        ab.addView(valueRow(R.string.update_check, BuildConfig.VERSION_NAME, true, () -> Updates.checkNow(this)));
+        page.addView(ab);
+
         TextView about = Ui.text(this, "Moor " + BuildConfig.VERSION_NAME + " · github.com/liangjiahui01/moor", 12, t.faint, Ui.REGULAR);
         about.setGravity(Gravity.CENTER);
         about.setPadding(0, dp(28), 0, 0);
