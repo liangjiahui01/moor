@@ -50,7 +50,7 @@ final class Setup {
             Prefs p = Prefs.of(c, m.id);
             SshLink l = null;
             try {
-                l = SshLink.open(p, Keys.privateKey(c), Keys.publicKeyBytes(c), known, (a, b, d, e) -> { });
+                l = SshLink.open(c, p, Keys.privateKey(c), Keys.publicKeyBytes(c), known, (a, b, d, e) -> { });
                 String[] hk = l.hostKey().split(" ");
                 if (!l.exec(Sessions.setupCommand(), null, 8_000).contains("python-ok")) {
                     throw new Pairing.PairException(c.getString(R.string.setup_need_python));
@@ -73,7 +73,8 @@ final class Setup {
                 if (m.id.equals(cur)) out.current = out.links.size();
                 out.links.add(Pairing.PREFIX + "v=1&h=" + Uri.encode(p.host) + "&p=" + p.port + "&u=" + Uri.encode(p.user)
                     + "&c=" + Uri.encode(p.startup) + "&n=" + Uri.encode(p.name) + "&hkt=" + Uri.encode(hk[0]) + "&hk=" + Uri.encode(hk[1])
-                    + "&k=" + Base64.getUrlEncoder().withoutPadding().encodeToString(seed) + "&id=" + id + "&exp=" + exp);
+                    + "&k=" + Base64.getUrlEncoder().withoutPadding().encodeToString(seed) + "&id=" + id + "&exp=" + exp
+                    + (p.rtcSignal.isEmpty() ? "" : "&rs=" + Uri.encode(p.rtcSignal) + "&rr=" + Uri.encode(p.rtcRoom) + "&rk=" + Uri.encode(p.rtcKey)));
             } catch (Exception e) {
                 android.util.Log.w("Moor", "invite failed for " + m.address(), e);
                 out.skipped.add(m.label(c) + " (" + Pairing.explain(c, e) + ")");

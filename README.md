@@ -32,7 +32,7 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 
 - Android 8.0 or newer.
 - A host you can reach over SSH (Linux or macOS) with `python3`. Nothing else to install: the app copies its helper over when it connects.
-- The phone must be able to reach the host directly: same LAN, VPN, or a public address.
+- The phone must reach the host's SSH port (same LAN, VPN, a public address, or a forwarded port), or use [direct connections](#away-from-the-hosts-network) through a small relay.
 
 ## Get started
 
@@ -55,6 +55,22 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 To add another machine later, run `moor pair` on it and use Add a machine at the top of the session list. Scanning a machine you already have updates it.
 
 Prefer to do it by hand? Fill in host, port and user in Settings, then copy the phone's public key into `~/.ssh/authorized_keys` on the host (Settings, Copy install command).
+
+## Away from the host's network
+
+When the host sits behind NAT (an office or cloud network) and the phone is elsewhere, Moor can connect the two directly over WebRTC. A small relay you run on any public server introduces them; SSH then flows peer to peer, and only touches the relay's address when no direct path exists.
+
+1. On a public server (open TCP 80), get `moor-rtc` from [Releases](https://github.com/liangjiahui01/moor/releases) and run `moor-rtc relay --listen :80` (as a service).
+2. On the host, get `moor-rtc` too and run:
+
+   ```sh
+   moor-rtc init --signal ws://RELAY_ADDRESS/ws   # writes ~/.config/moor/rtc.json (room and key)
+   moor-rtc host                                  # keep it running, e.g. as a systemd user service
+   ```
+
+3. Pair again with `moor pair`: the link now carries the relay, room and key.
+
+The status shows "Connected · direct" for a peer-to-peer connection, or "via relay" when it fell back to the machine's address. When the host's SSH port can't be reached from outside either, point that address at a reverse tunnel on the relay server (`ssh -R`), and pair with `moor pair --host RELAY_ADDRESS --port PORT --sshd-port 22`.
 
 ## Notifications
 
@@ -99,6 +115,7 @@ SSH connection ───── attach ───────▶ moor attach ─�
 - Pairing: `moor pair` adds a throwaway key to `authorized_keys` with `expiry-time`, `restrict` and `command=` so it can only run `moor claim`. The QR code carries the host, the host key and the throwaway key's seed. The phone logs in once, hands over its own public key, and the throwaway key is removed. The host key from the QR code is pinned, so there is no trust-on-first-use prompt.
 - Setting up another device: the configured device logs in to each machine with its own key and runs `moor invite`, which adds the same kind of throwaway key (made on the device). The QR code carries one such pairing link per machine plus the app settings, deflated; the new device claims each link with its own key. No private key is copied.
 - The private key is generated on the phone and never leaves it.
+- Direct connections: for each SSH connection the app runs `moor-rtc dial` (bundled in the APK) and speaks SSH over its stdin and stdout. It sends an offer through the relay to `moor-rtc host`, which answers; the two then find a path with ICE (public STUN servers, no TURN) and open a data channel that the host connects to its sshd. Offers and answers are signed with the shared key from the pairing link, which never crosses the network. SSH runs inside unchanged, so it stays end-to-end encrypted and the host key is checked as before; the relay sees only the session descriptions.
 
 ## Build
 
@@ -114,12 +131,13 @@ host=my-box.lan
 user=me
 ```
 
+Go (1.22 or newer) builds `moor-rtc` into the APK for direct connections; without Go the app builds without them.
+
 Release builds are signed with `android/keystore.properties` when present (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`), otherwise with the debug key.
 
 ## Roadmap
 
 - iOS app.
-- Reaching the host from outside its network without a VPN.
 
 ## License
 

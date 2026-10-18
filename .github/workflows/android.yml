@@ -25,6 +25,12 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # moor-rtc (direct connections) is built into the APK by Gradle
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: rtc/go.mod
+          cache-dependency-path: rtc/go.sum
+
       - name: Signing key
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -47,14 +53,25 @@ jobs:
           [ "$GITHUB_REF_TYPE" = tag ] || V="dev-${GITHUB_SHA::7}"
           cp app/build/outputs/apk/release/app-release.apk "moor-$V.apk"
 
+      - name: moor-rtc for machines and relays
+        working-directory: rtc
+        run: |
+          for a in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$a go build -trimpath -ldflags "-s -w" -o ../android/moor-rtc-linux-$a .
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: moor-apk
-          path: android/moor-*.apk
+          path: |
+            android/moor-*.apk
+            android/moor-rtc-linux-*
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/moor-*.apk
+          files: |
+            android/moor-*.apk
+            android/moor-rtc-linux-*
           generate_release_notes: true

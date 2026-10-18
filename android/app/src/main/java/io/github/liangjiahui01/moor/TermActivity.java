@@ -1041,8 +1041,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         main.removeCallbacks(hideStatus);
         if (state == TermService.State.CONNECTED) {
             if (prev != null && prev != TermService.State.CONNECTED) {
-                showStatus(getString(R.string.state_connected), t.ok);
-                main.postDelayed(hideStatus, 1200);
+                // The message ends with " · direct" / " · via relay" for WebRTC connections
+                int dot = message == null ? -1 : message.lastIndexOf(" · ");
+                showStatus(getString(R.string.state_connected) + (dot < 0 ? "" : message.substring(dot)), t.ok);
+                main.postDelayed(hideStatus, dot < 0 ? 1200 : 2000);
             } else {
                 status.setVisibility(View.GONE);
             }

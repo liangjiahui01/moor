@@ -41,7 +41,7 @@ final class SshLink implements TerminalSession.Transport {
     }
 
     /** Blocking; call off the main thread. Connects without opening a terminal. */
-    static SshLink open(Prefs prefs, byte[] prv, byte[] pub, File knownHosts, Listener listener) throws Exception {
+    static SshLink open(android.content.Context c, Prefs prefs, byte[] prv, byte[] pub, File knownHosts, Listener listener) throws Exception {
         JschSetup.init();
         JSch jsch = new JSch();
         jsch.addIdentity("moor", prv, pub, null);
@@ -58,11 +58,27 @@ final class SshLink implements TerminalSession.Transport {
         String savedType = savedHostKeyType(knownHosts, prefs.host + ":" + prefs.port);
         if (savedType != null) cfg.put("server_host_key", preferHostKeyType(savedType, false));
         s.setConfig(cfg);
+        Rtc.Proxy proxy = null;
+        if (Rtc.usable(c, prefs.rtcSignal, prefs.rtcRoom, prefs.rtcKey)) {
+            proxy = new Rtc.Proxy(c, prefs.rtcSignal, prefs.rtcRoom, prefs.rtcKey);
+            s.setProxy(proxy);
+        }
         s.setServerAliveInterval(10_000);
         s.setServerAliveCountMax(3);
-        s.connect(8_000);
+        // A direct connection first looks for a path (up to 10 s) before falling back
+        s.connect(proxy != null ? 25_000 : 8_000);
         checkHostKey(s, knownHosts);
-        return new SshLink(s, listener);
+        SshLink l = new SshLink(s, listener);
+        l.proxy = proxy;
+        return l;
+    }
+
+    private Rtc.Proxy proxy;
+
+    /** "direct" (peer to peer), "relay" (direct failed, went to the address) or "" (plain SSH). */
+    String route() {
+        Rtc.Proxy p = proxy;
+        return p == null ? "" : p.route;
     }
 
     /**

@@ -58,6 +58,10 @@ android {
         resources {
             excludes += ["META-INF/versions/*/OSGI-INF/MANIFEST.MF", "META-INF/*.md"]
         }
+        // moor-rtc is an executable shipped as lib*.so; it must be extracted to run
+        jniLibs {
+            useLegacyPackaging true
+        }
     }
 
     androidResources {
@@ -66,6 +70,7 @@ android {
 
     sourceSets {
         main.assets.srcDirs += layout.buildDirectory.dir("generated/moor-assets")
+        main.jniLibs.srcDirs += layout.buildDirectory.dir("generated/moor-jni")
     }
 }
 
@@ -75,6 +80,38 @@ def copyServerHelper = tasks.register("copyServerHelper", Copy) {
     into(layout.buildDirectory.dir("generated/moor-assets/server"))
 }
 tasks.named("preBuild") { dependsOn copyServerHelper }
+
+// Direct connections: build moor-rtc (Go, ../rtc) for the phone ABIs. Without Go the app still
+// builds; it then connects the usual way only.
+def rtcAbis = ["arm64-v8a": "arm64"]
+def buildRtc = tasks.register("buildRtc") {
+    def src = rootProject.file("../rtc")
+    def out = layout.buildDirectory.dir("generated/moor-jni")
+    inputs.files(fileTree(src) { include "**/*.go", "go.mod", "go.sum" })
+    outputs.dir(out)
+    doLast {
+        def go = ["go", "${System.getProperty("user.home")}/.local/go/bin/go", "/usr/local/go/bin/go"].find { g ->
+            try { return [g, "version"].execute().waitFor() == 0 } catch (Exception ignored) { return false }
+        }
+        if (go == null) {
+            logger.warn("Go not found: building without direct connections (moor-rtc)")
+            return
+        }
+        rtcAbis.each { abi, arch ->
+            def dest = out.get().file("${abi}/libmoorrtc.so").asFile
+            dest.parentFile.mkdirs()
+            // GOOS=android: pion lists network interfaces through wlynxg/anet there, since apps may not
+            // read them over netlink; anet links into the net package, hence -checklinkname=0
+            def pb = new ProcessBuilder(go, "build", "-trimpath", "-buildvcs=false", "-ldflags", "-s -w -checklinkname=0",
+                "-o", dest.absolutePath, ".").directory(src).redirectErrorStream(true)
+            pb.environment().putAll([GOOS: "android", GOARCH: arch, CGO_ENABLED: "0"])
+            def p = pb.start()
+            def log = p.inputStream.text
+            if (p.waitFor() != 0) throw new GradleException("moor-rtc build failed for ${abi}:\n${log}")
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn buildRtc }
 
 dependencies {
     implementation "androidx.annotation:annotation:1.9.1"

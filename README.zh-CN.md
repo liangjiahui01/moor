@@ -32,7 +32,7 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 
 - Android 8.0 及以上。
 - 一台能 SSH 登录的主机（Linux 或 macOS），装有 `python3`。不用另装别的，应用连上时会把辅助脚本拷过去。
-- 手机要能直连主机：同一局域网、VPN 或公网地址。
+- 手机要能连到主机的 SSH 端口（同一局域网、VPN、公网地址或转发端口），或者经一个小中继走[直连](#不在主机所在网络时)。
 
 ## 开始使用
 
@@ -55,6 +55,22 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 以后要加别的机器，在那台机器上运行 `moor pair`，再点会话列表顶部的「添加机器」。扫已有机器的码会更新它。
 
 想手动配置：在设置里填主机、端口、用户名，再把手机公钥加到主机的 `~/.ssh/authorized_keys`（设置 → 复制添加命令）。
+
+## 不在主机所在网络时
+
+主机在 NAT 后面（公司或云上的内网）、手机在别处时，Moor 可以用 WebRTC 让两边直接连通。你在任意一台公网服务器上跑一个小中继，它只负责介绍双方；之后 SSH 点对点传输，只有找不到直连路径时才走机器地址。
+
+1. 在公网服务器上（放行 TCP 80）从 [Releases](https://github.com/liangjiahui01/moor/releases) 下载 `moor-rtc`，以服务方式运行 `moor-rtc relay --listen :80`。
+2. 在主机上也下载 `moor-rtc`，运行：
+
+   ```sh
+   moor-rtc init --signal ws://中继地址/ws   # 生成 ~/.config/moor/rtc.json（房间号和密钥）
+   moor-rtc host                             # 常驻运行，比如做成 systemd 用户服务
+   ```
+
+3. 重新 `moor pair` 配对：配对链接会带上中继地址、房间号和密钥。
+
+点对点连上时状态显示「已连接 · 直连」，退回机器地址时显示「中转」。如果主机的 SSH 端口在外网也连不到，可以在中继服务器上做一条反向隧道（`ssh -R`）当这个地址，用 `moor pair --host 中继地址 --port 端口 --sshd-port 22` 配对。
 
 ## 通知
 
@@ -99,6 +115,7 @@ SSH 连接 ─────── 接入 ─────────────�
 - 配对：`moor pair` 往 `authorized_keys` 加一把临时密钥，带 `expiry-time`、`restrict` 和 `command=`，只能执行 `moor claim`。二维码里有主机地址、主机公钥和临时密钥的种子。手机用它登录一次，交出自己的公钥，临时密钥随即删除。主机公钥按二维码里的固定下来，不走首次连接信任。
 - 配置另一台设备：已配好的设备用自己的密钥登录每台机器，运行 `moor invite`，加一把同样的临时密钥（在设备上生成）。二维码里是每台机器一条配对链接，加上应用设置，压缩后编码；新设备用自己的密钥逐条认领。不拷贝任何私钥。
 - 私钥在手机上生成，不离开手机。
+- 直连：应用为每条 SSH 连接运行一个 `moor-rtc dial`（打包在 APK 里），SSH 走它的标准输入输出。它经中继把 offer 发给 `moor-rtc host`，对方回 answer；两边用 ICE 找路径（公共 STUN 服务器，不用 TURN），打开一条数据通道，主机把通道接到本机 sshd。offer 和 answer 用配对链接里的共享密钥签名，密钥本身不在网络上传输。SSH 原样跑在通道里，仍然端到端加密、照常校验主机密钥；中继只看得到会话描述。
 
 ## 构建
 
@@ -114,12 +131,13 @@ host=my-box.lan
 user=me
 ```
 
+装有 Go（1.22 及以上）时，构建会把直连用的 `moor-rtc` 打进 APK；没有 Go 也能构建，只是不带直连。
+
 存在 `android/keystore.properties`（`storeFile`、`storePassword`、`keyAlias`、`keyPassword`）时，release 包用它签名，否则用 debug 证书。
 
 ## 规划
 
 - iOS 应用。
-- 不靠 VPN 从外网连到主机。
 
 ## 许可
 

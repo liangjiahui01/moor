@@ -30,11 +30,17 @@ final class Pairing {
         "ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa");
 
     final String host, user, cmd, hostKeyType, hostKey, id, name;
+    /** Direct connections: relay address, room, shared key (all empty when the machine has none). */
+    final String rtcSignal, rtcRoom, rtcKey;
     final int port;
     final long expiresAt;
     private final byte[] seed;
 
-    private Pairing(String host, int port, String user, String cmd, String hostKeyType, String hostKey, byte[] seed, String id, long exp, String name) {
+    private Pairing(String host, int port, String user, String cmd, String hostKeyType, String hostKey, byte[] seed, String id, long exp, String name,
+                    String rtcSignal, String rtcRoom, String rtcKey) {
+        this.rtcSignal = rtcSignal;
+        this.rtcRoom = rtcRoom;
+        this.rtcKey = rtcKey;
         this.host = host;
         this.port = port;
         this.user = user;
@@ -72,10 +78,15 @@ final class Pairing {
             if (t == null) t = "ssh-ed25519";
             if (!HOST_KEY_TYPES.contains(t)) return null;
             return new Pairing(host, p == null ? 22 : Integer.parseInt(p), user, c == null ? "" : c, t, hk, seed,
-                id == null ? "" : id, e == null ? 0 : Long.parseLong(e) * 1000, n == null ? "" : n.trim());
+                id == null ? "" : id, e == null ? 0 : Long.parseLong(e) * 1000, n == null ? "" : n.trim(),
+                orEmpty(u.getQueryParameter("rs")), orEmpty(u.getQueryParameter("rr")), orEmpty(u.getQueryParameter("rk")));
         } catch (RuntimeException ex) {
             return null;
         }
+    }
+
+    private static String orEmpty(String s) {
+        return s == null ? "" : s.trim();
     }
 
     boolean expired() {
@@ -96,6 +107,7 @@ final class Pairing {
         cfg.put("server_host_key", SshLink.preferHostKeyType(hostKeyType, true));
         s.setConfig(cfg);
         s.setTimeout(10_000);
+        if (Rtc.usable(c, rtcSignal, rtcRoom, rtcKey)) s.setProxy(new Rtc.Proxy(c, rtcSignal, rtcRoom, rtcKey));
         try {
             s.connect(8_000);
             if (!hostKeyType.equals(s.getHostKey().getType()) || !hostKey.equals(s.getHostKey().getKey())) throw new PairException(c.getString(R.string.pair_err_hostkey));
@@ -131,6 +143,9 @@ final class Pairing {
         else if (Prefs.load(c).configured()) Prefs.addMachine(c);
         Prefs.save(c, host, port, user, cmd);
         if (!name.isEmpty() && Prefs.load(c).name.isEmpty()) Prefs.put(c, "name", name);
+        Prefs.put(c, "rtc_signal", rtcSignal);
+        Prefs.put(c, "rtc_room", rtcRoom);
+        Prefs.put(c, "rtc_key", rtcKey);
         File store = new File(c.getFilesDir(), "known_hosts");
         Properties known = new Properties();
         if (store.exists()) {

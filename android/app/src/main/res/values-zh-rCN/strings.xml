@@ -235,4 +235,6 @@
     <string name="setup_confirm">开始配置</string>
     <string name="setup_running">正在配置…</string>
     <string name="setup_partial">未添加：%1$s</string>
+    <string name="route_direct">直连</string>
+    <string name="route_relay">中转</string>
 </resources>

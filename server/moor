@@ -185,6 +185,19 @@ def host_key(ports):
              "If sshd listens on another port, pass --sshd-port." % "/".join(map(str, ports)))
 
 
+def rtc_config():
+    """Direct connections (moor-rtc): relay, room and key from ~/.config/moor/rtc.json, or None."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    try:
+        with open(os.path.join(base, "moor", "rtc.json")) as f:
+            c = json.load(f)
+        if c.get("signal") and c.get("room") and c.get("key"):
+            return c
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def pair(args):
     ports = [args.sshd_port] if args.sshd_port else list(dict.fromkeys([args.port, 22]))
     hk_type, hk = host_key(ports)
@@ -203,6 +216,9 @@ def pair(args):
         "hkt": hk_type, "hk": hk, "k": base64.urlsafe_b64encode(seed).decode().rstrip("="),
         "id": pid, "exp": str(int(expires.timestamp())),
     }
+    rtc = rtc_config()
+    if rtc:
+        q.update({"rs": rtc["signal"], "rr": rtc["room"], "rk": rtc["key"]})
     url = "moor://pair?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote)
     print_qr(url)
     print("\nIn Moor: Settings → Scan QR, or Add machine on the session list. Or copy the link below and use Paste link.")

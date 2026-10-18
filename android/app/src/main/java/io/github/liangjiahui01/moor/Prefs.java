@@ -29,6 +29,8 @@ final class Prefs {
     /** "system", "dark" or "light". */
     final String theme;
     final boolean notifyAttention, notifyDone, notifyBell;
+    /** Direct connections (WebRTC): relay address, room and shared key from the pairing link; empty = off. */
+    final String rtcSignal, rtcRoom, rtcKey;
     private final boolean saved;
 
     private Prefs(Context c, String id) {
@@ -43,6 +45,9 @@ final class Prefs {
         user = m.getString("user", first ? BuildConfig.DEFAULT_USER : "");
         startup = m.getString("startup", "");
         session = m.getString("session", null);
+        rtcSignal = m.getString("rtc_signal", "");
+        rtcRoom = m.getString("rtc_room", "");
+        rtcKey = m.getString("rtc_key", "");
         saved = m.getBoolean("saved", false) || m.contains("host");
         fontSize = g.getInt("font_size", 0);
         imeCompat = g.getBoolean("ime_compat", false);
@@ -216,7 +221,8 @@ final class Prefs {
     // ---- writes ----
 
     /** Keys stored per machine; everything else is app-wide. */
-    private static final List<String> MACHINE_KEYS = Arrays.asList("name", "host", "port", "user", "startup");
+    private static final List<String> MACHINE_KEYS = Arrays.asList("name", "host", "port", "user", "startup",
+        "rtc_signal", "rtc_room", "rtc_key");
 
     /** Saves the current machine's connection. */
     static void save(Context c, String host, int port, String user, String startup) {

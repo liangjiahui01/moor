@@ -251,4 +251,6 @@
     <string name="setup_confirm">Set up</string>
     <string name="setup_running">Setting up…</string>
     <string name="setup_partial">Not added: %1$s</string>
+    <string name="route_direct">direct</string>
+    <string name="route_relay">via relay</string>
 </resources>

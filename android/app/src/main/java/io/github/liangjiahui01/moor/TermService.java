@@ -223,7 +223,7 @@ public class TermService extends Service {
             try {
                 byte[] prv = Keys.privateKey(this);
                 byte[] pub = Keys.publicKeyBytes(this);
-                SshLink l = SshLink.open(prefs, prv, pub, known, this::onChannelClosed);
+                SshLink l = SshLink.open(this, prefs, prv, pub, known, this::onChannelClosed);
                 boolean python = false;
                 try {
                     String out = l.exec(Sessions.setupCommand(), null, 8_000);
@@ -299,7 +299,9 @@ public class TermService extends Service {
         link = l;
         attempt = 0;
         pythonOk = python;
-        setState(State.CONNECTED, prefs.user + "@" + prefs.host);
+        String route = l.route().equals("direct") ? " · " + getString(R.string.route_direct)
+            : l.route().equals("relay") ? " · " + getString(R.string.route_relay) : "";
+        setState(State.CONNECTED, prefs.user + "@" + prefs.host + route);
         if (python) startEvents(l);
         if (!python) {
             // No python3 for the session daemon: fall back to one throwaway shell
