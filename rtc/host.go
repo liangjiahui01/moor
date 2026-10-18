@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -78,7 +80,12 @@ func hostMain(args []string) {
 
 // session holds one connection to the relay and serves phones until it drops.
 func (h *host) session() error {
-	ws, _, err := dialer.Dial(signalURL(h.cfg.Signal, "host", h.cfg.Room), nil)
+	hdr := http.Header{}
+	hdr.Set(hostAuthHeader, hostAuth(h.key, h.cfg.Room))
+	ws, resp, err := dialer.Dial(signalURL(h.cfg.Signal, "host", h.cfg.Room), hdr)
+	if resp != nil && resp.StatusCode == http.StatusForbidden {
+		return errors.New("the relay has this room pinned to another machine's key")
+	}
 	if err != nil {
 		return err
 	}

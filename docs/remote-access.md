@@ -27,7 +27,8 @@ Each side asks public STUN servers for its address on the internet, puts it in t
 
 - Offers and answers are signed with a shared key made at pairing (HMAC-SHA256). The key lives only in the host's `~/.config/moor/rtc.json` and on the phone, and never crosses the relay, so the relay can't forge messages or pose as either side.
 - SSH runs unchanged inside the data channel: still end-to-end encrypted, and the phone checks the host key it recorded at pairing. The relay sees only the session descriptions (each side's candidate addresses), never the terminal.
-- The relay stores nothing; a restart forgets everything.
+- When the host joins the relay it shows a proof derived from the shared key (not the key itself), and the relay binds the room to the first host that showed one. Someone who only knows the room can neither pose as the host nor push it off.
+- The relay writes nothing to disk; a restart forgets everything.
 
 ## Setup
 
@@ -94,6 +95,8 @@ Run `moor pair` on the host again and scan the code. The link now carries the re
 ## Fallback path (optional)
 
 When no direct path exists (both sides behind symmetric NAT, or UDP blocked), the app connects to the machine address from pairing instead. If that address can't be reached from outside either, a reverse tunnel on the relay server can stand in for it, at the cost of routing traffic through that server.
+
+The tunnel puts the host's sshd on the public internet, where anyone can connect and try to log in. Leave it off while direct connections work.
 
 On the relay server:
 

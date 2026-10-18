@@ -23,6 +23,9 @@ type room struct {
 type relay struct {
 	mu    sync.Mutex
 	rooms map[string]*room
+	// pins holds each room's machine proof (see hostAuth), from the first machine that showed one:
+	// someone who only knows the room can't take the machine's place
+	pins map[string]string
 }
 
 var upgrader = websocket.Upgrader{ReadBufferSize: 16 << 10, WriteBufferSize: 16 << 10, CheckOrigin: func(*http.Request) bool { return true }}
@@ -31,7 +34,7 @@ func relayMain(args []string) {
 	fs := flag.NewFlagSet("relay", flag.ExitOnError)
 	listen := fs.String("listen", ":80", "address to listen on")
 	fs.Parse(args)
-	r := &relay{rooms: map[string]*room{}}
+	r := &relay{rooms: map[string]*room{}, pins: map[string]string{}}
 	http.HandleFunc("/ws", r.serve)
 	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("moor-rtc relay\n")) })
 	logf("relay listening on %s", *listen)
@@ -62,9 +65,23 @@ func (r *relay) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	tooMany := len(r.rooms) > 10000
+	denied := false
+	if role == "host" {
+		auth := req.Header.Get(hostAuthHeader)
+		if pin, ok := r.pins[id]; ok {
+			denied = !validMAC(auth, pin)
+		} else if auth != "" && len(r.pins) < 100000 {
+			r.pins[id] = auth
+		}
+	}
 	r.mu.Unlock()
 	if tooMany {
 		http.Error(w, "busy", http.StatusServiceUnavailable)
+		return
+	}
+	if denied {
+		logf("room %s…: machine without the right proof refused", id[:6])
+		http.Error(w, "room belongs to another machine", http.StatusForbidden)
 		return
 	}
 	ws, err := upgrader.Upgrade(w, req, nil)

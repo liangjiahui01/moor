@@ -46,6 +46,12 @@ func helloMAC(key []byte, m Msg) string { return mac(key, "hello", m.ID, strconv
 // sdpMAC signs an offer or answer; the type is part of the signature.
 func sdpMAC(key []byte, m Msg) string { return mac(key, m.T, m.ID, m.SDP) }
 
+// hostAuthHeader carries hostAuth when the machine joins the relay.
+const hostAuthHeader = "X-Moor-Host-Auth"
+
+// hostAuth proves to the relay that a machine holds the room's key, without revealing the key.
+func hostAuth(key []byte, room string) string { return mac(key, "host", room) }
+
 func validMAC(got, want string) bool { return hmac.Equal([]byte(got), []byte(want)) }
 
 func randID(n int) string {
