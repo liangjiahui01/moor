@@ -56,10 +56,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private SessionPanel panel;
     private View topBar;
     private FrameLayout termBox;
-    /** The session list is up (or on its way up); it hides with an animation, so panel.shown() lags. */
-    private boolean listVisible;
-    /** Terminal without the title bar and the status bar; the session list still shows both. */
-    private boolean fullscreen;
     private TermService service;
     private int fontSize;
     private boolean ctrlOn, altOn, volCtrl;
@@ -115,14 +111,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
         LinearLayout root = Ui.column(this);
         root.setBackgroundColor(t.bg);
-        // In fullscreen the window covers the camera-cutout strip too, so it can be painted like the terminal
-        if (android.os.Build.VERSION.SDK_INT >= 28) {
-            WindowManager.LayoutParams wa = getWindow().getAttributes();
-            wa.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-            getWindow().setAttributes(wa);
-        }
         topBar = buildTopBar();
-        root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(56)));
+        root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(40)));
 
         termBox = new FrameLayout(this);
         view = new TerminalView(this, null);
@@ -150,7 +140,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         termBox.addView(status, slp);
         root.addView(termBox, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        fullscreen = Prefs.raw(this).getBoolean("fullscreen", false);
+        Prefs.raw(this).edit().remove("fullscreen").apply(); // the fullscreen mode is gone
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(t.bg));
         keyArea = Ui.column(this);
         keyArea.setBackgroundColor(t.keyBar);
         buildKeys();
@@ -163,7 +154,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         setContentView(top);
         // No previous session: open straight into the session list
         if (Prefs.load(this).session == null) panel.show(null);
-        applyBars();
 
         fontSize = Prefs.load(this).fontSize;
         if (fontSize <= 0) fontSize = evenPx(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13,
@@ -214,7 +204,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     protected void onResume() {
         super.onResume();
-        if (topBar != null) applyBars();
         if (Theme.get(this).dark != themeDark) {
             recreate();
             return;
@@ -260,37 +249,38 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     // ---- top bar ----
 
+    /** One slim row: back, session name and status dot, what runs there and where, the session count. */
     private View buildTopBar() {
         LinearLayout bar = Ui.row(this);
-        bar.setPadding(dp(4), 0, dp(10), 0);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(0, 0, dp(8), 0);
         bar.setBackgroundColor(t.bg);
-        bar.addView(Ui.iconButton(this, t, R.drawable.ic_back, t.sub, getString(R.string.a11y_sessions), v -> panel.show(null)));
+        View back = Ui.iconButton(this, t, R.drawable.ic_back, t.sub, getString(R.string.a11y_sessions), v -> panel.show(null));
+        bar.addView(back, Ui.lp(dp(40), dp(40)));
 
-        LinearLayout titles = Ui.column(this);
-        titles.setPadding(dp(2), 0, dp(8), 0);
-        LinearLayout r1 = Ui.row(this);
-        title = Ui.oneLine(Ui.text(this, "", 15.5f, t.text, Ui.SEMIBOLD), TextUtils.TruncateAt.END);
-        r1.addView(title, new LinearLayout.LayoutParams(-2, -2, 0f));
+        title = Ui.oneLine(Ui.text(this, "", 14.5f, t.text, Ui.SEMIBOLD), TextUtils.TruncateAt.END);
+        title.setMaxWidth(dp(150));
+        bar.addView(title, Ui.lp(-2, -2));
         titleDot = Ui.dot(this, t.accent, 6);
         LinearLayout.LayoutParams dlp = Ui.lp(dp(6), dp(6));
-        dlp.leftMargin = dp(7);
-        r1.addView(titleDot, dlp);
-        titles.addView(r1);
-        subtitle = Ui.oneLine(Ui.monoText(this, "", 11.5f, t.faint), TextUtils.TruncateAt.MIDDLE);
-        subtitle.setPadding(0, dp(3), 0, 0);
-        titles.addView(subtitle);
-        bar.addView(titles, Ui.weight(1));
+        dlp.setMargins(dp(6), 0, dp(8), 0);
+        bar.addView(titleDot, dlp);
+        subtitle = Ui.oneLine(Ui.monoText(this, "", 11, t.faint), TextUtils.TruncateAt.MIDDLE);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, -2, 1f);
+        slp.rightMargin = dp(8);
+        bar.addView(subtitle, slp);
 
         LinearLayout chip = Ui.row(this);
-        chip.setPadding(dp(10), 0, dp(12), 0);
-        chip.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
-        chip.addView(Ui.icon(this, R.drawable.ic_sessions, t.sub, 15));
-        countLabel = Ui.text(this, "", 12.5f, t.text, Ui.MEDIUM);
-        countLabel.setPadding(dp(6), 0, 0, 0);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(9), 0, dp(10), 0);
+        chip.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(13)), dp(13)));
+        chip.addView(Ui.icon(this, R.drawable.ic_sessions, t.sub, 14));
+        countLabel = Ui.text(this, "", 12, t.text, Ui.MEDIUM);
+        countLabel.setPadding(dp(5), 0, 0, 0);
         chip.addView(countLabel);
         chip.setContentDescription(getString(R.string.a11y_sessions));
         chip.setOnClickListener(v -> panel.show(null));
-        bar.addView(chip, Ui.lp(-2, dp(32)));
+        bar.addView(chip, Ui.lp(-2, dp(26)));
         return bar;
     }
 
@@ -463,8 +453,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         actions.addView(actionTile(R.drawable.ic_input, R.string.k_input, this::showInputBox), tileLp());
         actions.addView(actionTile(R.drawable.ic_image, R.string.k_image, this::showImageSource), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
-        actions.addView(actionTile(fullscreen ? R.drawable.ic_fullscreen_exit : R.drawable.ic_fullscreen,
-            fullscreen ? R.string.k_fullscreen_exit : R.string.k_fullscreen, this::toggleFullscreen), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
         p.addView(actions);
 
@@ -487,39 +475,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         TextView l = Ui.text(this, getString(res), 11.5f, t.faint, Ui.MEDIUM);
         l.setPadding(dp(4), dp(6), 0, dp(5));
         return l;
-    }
-
-    private void toggleFullscreen() {
-        fullscreen = !fullscreen;
-        Prefs.put(this, "fullscreen", fullscreen);
-        buildKeys();
-        applyBars();
-    }
-
-    /** Hides the title bar and status bar in fullscreen while the terminal is in front. */
-    private void applyBars() {
-        boolean hide = fullscreen && !listVisible;
-        topBar.setVisibility(hide ? View.GONE : View.VISIBLE);
-        // The system keeps content clear of the camera cutout; that strip shows the window background
-        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(hide ? t.terminalBg() : t.bg));
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            android.view.WindowInsetsController c = getWindow().getInsetsController();
-            if (c == null) return;
-            c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            if (hide) c.hide(android.view.WindowInsets.Type.statusBars());
-            else c.show(android.view.WindowInsets.Type.statusBars());
-        } else {
-            View d = getWindow().getDecorView();
-            int f = d.getSystemUiVisibility() & ~(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
-            if (hide) f |= View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
-            d.setSystemUiVisibility(f);
-        }
-    }
-
-    @Override
-    public void onPanelVisible(boolean visible) {
-        listVisible = visible;
-        if (topBar != null) applyBars();
     }
 
     private LinearLayout.LayoutParams tileLp() {

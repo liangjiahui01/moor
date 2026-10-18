@@ -30,9 +30,6 @@ final class SessionPanel extends FrameLayout {
         void openSettings();
 
         void hideKeyboard();
-
-        /** The list was shown or hidden. */
-        default void onPanelVisible(boolean visible) { }
     }
 
     private final Host host;
@@ -141,7 +138,6 @@ final class SessionPanel extends FrameLayout {
         }
         if (!shown()) {
             setVisibility(VISIBLE);
-            host.onPanelVisible(true);
             setAlpha(0f);
             setTranslationY(dp(24));
             animate().alpha(1f).translationY(0).setDuration(160).start();
@@ -154,7 +150,6 @@ final class SessionPanel extends FrameLayout {
     void hide() {
         main.removeCallbacks(poll);
         if (!shown()) return;
-        host.onPanelVisible(false);
         animate().alpha(0f).translationY(dp(24)).setDuration(140).withEndAction(() -> setVisibility(GONE)).start();
     }
 
