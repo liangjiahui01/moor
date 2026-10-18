@@ -123,6 +123,22 @@ public class SettingsActivity extends Activity {
         page.addView(pair);
         TextView pairHint = hint(getString(R.string.pair_hint));
         page.addView(pairHint);
+        if (p.configured()) {
+            LinearLayout setup = Ui.row(this);
+            setup.setGravity(Gravity.CENTER);
+            setup.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(14)), dp(14)));
+            setup.addView(Ui.icon(this, R.drawable.ic_devices, t.text, 18));
+            TextView sl = Ui.text(this, getString(R.string.setup_device), 14, t.text, Ui.MEDIUM);
+            sl.setPadding(dp(8), 0, 0, 0);
+            setup.addView(sl);
+            setup.setOnClickListener(v -> showSetupDevice());
+            LinearLayout.LayoutParams sdl = new LinearLayout.LayoutParams(-1, dp(50));
+            sdl.topMargin = dp(12);
+            page.addView(setup, sdl);
+            TextView sh = hint(getString(R.string.setup_device_hint));
+            sh.setPadding(sh.getPaddingLeft(), sh.getPaddingTop(), sh.getPaddingRight(), dp(14));
+            page.addView(sh);
+        }
 
         LinearLayout card = card();
         card.addView(valueRow(R.string.f_name, p.label(this), true,
@@ -443,6 +459,10 @@ public class SettingsActivity extends Activity {
     }
 
     private View toggleRow(int label, int sub, boolean on, String key) {
+        return toggleRow(label, sub, on, v -> Prefs.put(this, key, v));
+    }
+
+    private View toggleRow(int label, int sub, boolean on, java.util.function.Consumer<Boolean> onChange) {
         LinearLayout r = Ui.row(this);
         r.setPadding(dp(16), dp(10), dp(14), dp(10));
         r.setMinimumHeight(dp(62));
@@ -469,7 +489,7 @@ public class SettingsActivity extends Activity {
         r.setBackground(Ui.pressable(t, null, 0));
         r.setOnClickListener(v -> {
             state[0] = !state[0];
-            Prefs.put(this, key, state[0]);
+            onChange.accept(state[0]);
             paint.run();
         });
         return r;
@@ -500,6 +520,98 @@ public class SettingsActivity extends Activity {
         r.addView(seg);
         r.setLayoutParams(Ui.lp(-1, dp(56)));
         return r;
+    }
+
+    // ---- set up another device: one-time codes for every machine, shown as a QR code ----
+
+    private void showSetupDevice() {
+        LinearLayout box = Ui.row(this);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setPadding(0, dp(8), 0, dp(12));
+        android.widget.ProgressBar spin = new android.widget.ProgressBar(this);
+        spin.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(t.accent));
+        box.addView(spin, Ui.lp(dp(26), dp(26)));
+        TextView l = Ui.text(this, getString(R.string.setup_preparing), 15, t.text, Ui.MEDIUM);
+        l.setPadding(dp(14), 0, 0, 0);
+        box.addView(l);
+        Dialog d = Ui.bottomSheet(this, t, box);
+        d.show();
+        new Thread(() -> {
+            byte[] helper;
+            try (java.io.InputStream in = getAssets().open("server/moor")) {
+                java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
+                helper = b.toByteArray();
+            } catch (java.io.IOException e) {
+                helper = new byte[0];
+            }
+            Setup.Invites inv = Setup.makeInvites(this, helper);
+            runOnUiThread(() -> {
+                if (isFinishing() || !d.isShowing()) return;
+                d.dismiss();
+                showSetupQr(inv);
+            });
+        }, "Setup").start();
+    }
+
+    private void showSetupQr(Setup.Invites inv) {
+        LinearLayout box = Ui.column(this);
+        if (inv.links.isEmpty()) {
+            box.addView(Ui.text(this, getString(R.string.setup_none), 18, t.text, Ui.SEMIBOLD));
+            if (!inv.skipped.isEmpty()) box.addView(hint(TextUtils.join("\n", inv.skipped)));
+            Ui.bottomSheet(this, t, box).show();
+            return;
+        }
+        box.addView(Ui.text(this, getString(R.string.setup_qr_title), 20, t.text, Ui.SEMIBOLD));
+        String until = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(new java.util.Date(inv.expiresAt));
+        TextView body = Ui.text(this, getString(R.string.setup_qr_body, until), 13.5f, t.sub, Ui.REGULAR);
+        body.setLineSpacing(dp(3), 1f);
+        body.setPadding(0, dp(8), 0, dp(14));
+        box.addView(body);
+
+        android.widget.ImageView qr = new android.widget.ImageView(this);
+        qr.setBackground(Ui.round(0xffffffff, dp(14)));
+        qr.setPadding(dp(10), dp(10), dp(10), dp(10));
+        int side = Math.min(dp(300), getResources().getDisplayMetrics().widthPixels - dp(80));
+        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(side, side);
+        qlp.gravity = Gravity.CENTER_HORIZONTAL;
+        box.addView(qr, qlp);
+        final boolean[] voice = {Setup.hasVoice(this)};
+        Runnable render = () -> qr.setImageBitmap(qrBitmap(Setup.bundle(this, inv, voice[0]), side - dp(20)));
+        render.run();
+
+        if (Setup.hasVoice(this)) {
+            LinearLayout c = card();
+            c.addView(toggleRow(R.string.setup_voice, R.string.setup_voice_sub, voice[0], v -> {
+                voice[0] = v;
+                render.run();
+            }));
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
+            clp.topMargin = dp(14);
+            box.addView(c, clp);
+        }
+        if (!inv.skipped.isEmpty()) box.addView(hint(getString(R.string.setup_skipped, TextUtils.join("; ", inv.skipped))));
+        Dialog d = Ui.bottomSheet(this, t, box);
+        d.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        d.show();
+    }
+
+    private static android.graphics.Bitmap qrBitmap(String text, int px) {
+        try {
+            java.util.Map<com.google.zxing.EncodeHintType, Object> hints = new java.util.EnumMap<>(com.google.zxing.EncodeHintType.class);
+            hints.put(com.google.zxing.EncodeHintType.ERROR_CORRECTION, com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.L);
+            hints.put(com.google.zxing.EncodeHintType.MARGIN, 0);
+            com.google.zxing.common.BitMatrix m = new com.google.zxing.qrcode.QRCodeWriter()
+                .encode(text, com.google.zxing.BarcodeFormat.QR_CODE, px, px, hints);
+            int w = m.getWidth(), h = m.getHeight();
+            int[] pixels = new int[w * h];
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) pixels[y * w + x] = m.get(x, y) ? 0xff000000 : 0xffffffff;
+            return android.graphics.Bitmap.createBitmap(pixels, w, h, android.graphics.Bitmap.Config.RGB_565);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private View pairButton(int icon, int label, String mode) {

@@ -235,4 +235,21 @@
     <string name="v_model_2">Streaming ASR 2.0</string>
     <string name="v_model_1">Streaming ASR 1.0</string>
     <string name="v_hint">Volcengine (Doubao) streaming speech recognition. Use an API Key from the new console, or an App ID and Access Token from the legacy console.</string>
+    <string name="setup_device">Set up another device</string>
+    <string name="setup_device_hint">Shows a QR code to scan in Moor on your other phone or tablet: it gets every machine and these settings, and registers its own key.</string>
+    <string name="setup_preparing">Making one-time codes…</string>
+    <string name="setup_qr_title">Scan on the other device</string>
+    <string name="setup_qr_body">In Moor on the other device: Settings → Scan QR. Valid until %1$s, single use. It registers its own key on each machine; this phone\'s key stays here.</string>
+    <string name="setup_voice">Include voice key</string>
+    <string name="setup_voice_sub">Anyone who sees this code can use the key</string>
+    <string name="setup_skipped">Not included: %1$s</string>
+    <string name="setup_none">Couldn\'t reach any machine</string>
+    <string name="setup_need_python">needs python3</string>
+    <string name="setup_no_ed25519">no ed25519 host key</string>
+    <string name="setup_confirm_title">Set up this device</string>
+    <string name="setup_confirm_body">Adds these machines and the other device\'s settings:\n%1$s</string>
+    <string name="setup_confirm_voice">Includes the voice key.</string>
+    <string name="setup_confirm">Set up</string>
+    <string name="setup_running">Setting up…</string>
+    <string name="setup_partial">Not added: %1$s</string>
 </resources>

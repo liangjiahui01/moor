@@ -219,4 +219,21 @@
     <string name="v_model_2">流式语音识别 2.0</string>
     <string name="v_model_1">流式语音识别 1.0</string>
     <string name="v_hint">火山引擎豆包流式语音识别。填新版控制台的 API Key，或旧版控制台的 App ID 和 Access Token。</string>
+    <string name="setup_device">配置另一台设备</string>
+    <string name="setup_device_hint">显示一个二维码，在你另一台手机或平板的 Moor 里扫一下：所有机器和这些设置都会带过去，它会登记自己的密钥。</string>
+    <string name="setup_preparing">正在生成一次性配对码…</string>
+    <string name="setup_qr_title">在另一台设备上扫码</string>
+    <string name="setup_qr_body">在另一台设备的 Moor 里：设置 → 扫码。%1$s 前有效，只能用一次。它会在每台机器上登记自己的密钥，这台手机的密钥不会离开手机。</string>
+    <string name="setup_voice">包含语音密钥</string>
+    <string name="setup_voice_sub">看到这个码的人都能用这个密钥</string>
+    <string name="setup_skipped">没有包含：%1$s</string>
+    <string name="setup_none">一台机器都连不上</string>
+    <string name="setup_need_python">需要 python3</string>
+    <string name="setup_no_ed25519">没有 ed25519 主机密钥</string>
+    <string name="setup_confirm_title">配置这台设备</string>
+    <string name="setup_confirm_body">将添加这些机器，并导入另一台设备的设置：\n%1$s</string>
+    <string name="setup_confirm_voice">包含语音密钥。</string>
+    <string name="setup_confirm">开始配置</string>
+    <string name="setup_running">正在配置…</string>
+    <string name="setup_partial">未添加：%1$s</string>
 </resources>

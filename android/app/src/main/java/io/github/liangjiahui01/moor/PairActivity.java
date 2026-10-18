@@ -75,6 +75,11 @@ public class PairActivity extends Activity {
     }
 
     private void handle(String text) {
+        Setup.Parsed setup = Setup.parse(text);
+        if (setup != null) {
+            handleSetup(setup);
+            return;
+        }
         Pairing p = Pairing.parse(text);
         if (p == null) {
             fail(getString(R.string.pair_not_link));
@@ -123,6 +128,83 @@ public class PairActivity extends Activity {
                 else done();
             });
         }, "Pair").start();
+    }
+
+    /** A setup code from another device: every machine on it, then its settings. */
+    private void handleSetup(Setup.Parsed setup) {
+        java.util.List<Pairing> live = new java.util.ArrayList<>();
+        for (Pairing p : setup.machines) if (!p.expired()) live.add(p);
+        if (live.isEmpty()) {
+            fail(getString(R.string.pair_expired));
+            return;
+        }
+        StringBuilder names = new StringBuilder();
+        for (Pairing p : live) {
+            if (names.length() > 0) names.append("\n");
+            names.append("· ").append(p.name.isEmpty() ? p.host : p.name).append("  ").append(p.user).append("@").append(p.host)
+                .append(p.port == 22 ? "" : ":" + p.port);
+        }
+        LinearLayout box = Ui.column(this);
+        box.addView(Ui.text(this, getString(R.string.setup_confirm_title), 20, t.text, Ui.SEMIBOLD));
+        String text = getString(R.string.setup_confirm_body, names.toString())
+            + (setup.hasVoice() ? "\n" + getString(R.string.setup_confirm_voice) : "");
+        TextView body = Ui.text(this, text, 14, t.sub, Ui.REGULAR);
+        body.setLineSpacing(Ui.dp(this, 4), 1f);
+        body.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 18));
+        box.addView(body);
+        buttons(box, getString(R.string.cancel), this::finish, getString(R.string.setup_confirm), () -> runSetup(setup, live));
+        show(box);
+    }
+
+    private void runSetup(Setup.Parsed setup, java.util.List<Pairing> live) {
+        LinearLayout box = Ui.row(this);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 12));
+        ProgressBar spin = new ProgressBar(this);
+        spin.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(t.accent));
+        box.addView(spin, Ui.lp(Ui.dp(this, 26), Ui.dp(this, 26)));
+        TextView l = Ui.text(this, getString(R.string.setup_running), 15, t.text, Ui.MEDIUM);
+        l.setPadding(Ui.dp(this, 14), 0, 0, 0);
+        box.addView(l);
+        show(box).setCancelable(false);
+        Pairing cur = setup.current >= 0 && setup.current < setup.machines.size() ? setup.machines.get(setup.current) : null;
+        new Thread(() -> {
+            java.util.List<String> failed = new java.util.ArrayList<>();
+            String lastErr = null;
+            int ok = 0;
+            for (Pairing p : live) {
+                try {
+                    p.claim(this);
+                    p.save(this);
+                    ok++;
+                } catch (Exception e) {
+                    android.util.Log.w("Moor", "setup pairing failed", e);
+                    lastErr = Pairing.explain(this, e);
+                    failed.add((p.name.isEmpty() ? p.host : p.name) + " (" + lastErr + ")");
+                }
+            }
+            if (ok > 0) {
+                Setup.applyPrefs(this, setup.prefs);
+                if (cur != null) {
+                    String id = Prefs.find(this, cur.host, cur.port, cur.user);
+                    if (id != null) Prefs.select(this, id);
+                }
+            }
+            final int added = ok;
+            final String err = lastErr;
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                if (added == 0) {
+                    fail(err);
+                    return;
+                }
+                if (!failed.isEmpty()) {
+                    Toast.makeText(this, getString(R.string.setup_partial, android.text.TextUtils.join("; ", failed)),
+                        Toast.LENGTH_LONG).show();
+                }
+                done();
+            });
+        }, "Setup").start();
     }
 
     private void done() {

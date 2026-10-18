@@ -31,9 +31,9 @@ final class Prefs {
     final boolean notifyAttention, notifyDone, notifyBell;
     private final boolean saved;
 
-    private Prefs(Context c) {
+    private Prefs(Context c, String id) {
         SharedPreferences g = raw(c);
-        machine = currentId(c);
+        machine = id;
         SharedPreferences m = file(c, machine);
         name = m.getString("name", "");
         // Optional build-time defaults from android/defaults.properties (not in git), for the first machine only
@@ -67,7 +67,12 @@ final class Prefs {
     }
 
     static Prefs load(Context c) {
-        return new Prefs(c);
+        return new Prefs(c, currentId(c));
+    }
+
+    /** One machine's connection (with the app-wide settings), current or not. */
+    static Prefs of(Context c, String id) {
+        return new Prefs(c, id);
     }
 
     /** Configured once the user saved a host; prefilled defaults don't count. */

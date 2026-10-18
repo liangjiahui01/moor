@@ -265,6 +265,11 @@ final class SshLink implements TerminalSession.Transport {
 
     boolean isClosed() { return closed; }
 
+    /** The host's public key as "type base64". */
+    String hostKey() {
+        return session.getHostKey().getType() + " " + session.getHostKey().getKey();
+    }
+
     void close() {
         if (closed) return;
         closed = true;

@@ -14,6 +14,8 @@
         Record an event (called by the hooks above and by Moor's tmux bell hook).
     moor watch [--since EPOCH_MS]
         Print events newer than EPOCH_MS, then follow new ones (used by the app).
+    moor invite ID MINUTES   (internal: the app adds a one-time pairing key read from stdin,
+                              to set up another device)
     moor claim ID     (internal: run by the one-time pairing key)
     moor clean        (remove expired one-time pairing keys)
 
@@ -136,6 +138,27 @@ def print_qr(text):
         print("".join(line) + "\033[0m")
 
 
+def add_pair_key(pub, pid, expires):
+    """Lets the throwaway key `pub` log in until `expires`, only to run `claim pid`."""
+    script = pathlib.Path(__file__).resolve()
+    env = f"MOOR_AUTHORIZED_KEYS={AK} " if "MOOR_AUTHORIZED_KEYS" in os.environ else ""
+    entry = (f'expiry-time="{expires:%Y%m%d%H%M}",restrict,command="{env}{sys.executable} {script} claim {pid}" '
+             f"ssh-ed25519 {pub} {MARK}{pid}")
+    rewrite_keys(lambda lines: drop_expired(lines) + [entry])
+
+
+def invite(pid, minutes):
+    """Like pair, for a key made elsewhere: the app sets up another device and sends the throwaway public key."""
+    if not re.fullmatch(r"[0-9a-f]{8}", pid) or not 1 <= minutes <= 30:
+        sys.exit("bad id or minutes")
+    line = sys.stdin.readline(4096).strip()
+    if not PUB_RE.fullmatch(line):
+        sys.exit("bad key")
+    expires = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
+    add_pair_key(line.split()[1], pid, expires)
+    print(f"ok {int(expires.timestamp())}")
+
+
 def pair(args):
     host_key = HOST_KEY.read_text().split()[1]
     pid = secrets.token_hex(4)
@@ -145,11 +168,7 @@ def pair(args):
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", MARK + pid, "-f", str(key)], check=True)
         seed = seed_of(key)
         pub = (pathlib.Path(d) / "k.pub").read_text().split()[1]
-    script = pathlib.Path(__file__).resolve()
-    env = f"MOOR_AUTHORIZED_KEYS={AK} " if "MOOR_AUTHORIZED_KEYS" in os.environ else ""
-    entry = (f'expiry-time="{expires:%Y%m%d%H%M}",restrict,command="{env}{sys.executable} {script} claim {pid}" '
-             f"ssh-ed25519 {pub} {MARK}{pid}")
-    rewrite_keys(lambda lines: drop_expired(lines) + [entry])
+    add_pair_key(pub, pid, expires)
 
     q = {
         "v": "1", "h": args.host, "p": str(args.port), "u": getpass.getuser(), "c": args.cmd,
@@ -1847,6 +1866,8 @@ def main():
     a = sys.argv[1:]
     if a[:1] == ["claim"]:
         claim(a[1] if len(a) > 1 else "")
+    elif a[:1] == ["invite"] and len(a) == 3 and a[2].isdigit():
+        invite(a[1], int(a[2]))
     elif a[:1] == ["clean"]:
         rewrite_keys(drop_expired)
     elif a[:1] == ["notify"] and len(a) >= 2:

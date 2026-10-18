@@ -21,7 +21,7 @@ Moor connects to a machine you can SSH into, keeps every session running there, 
 | Session list | Sessions are grouped into "Needs you", "Running" and "Idle", with a live preview of the last lines. |
 | Several machines | Add as many machines as you like and switch between them from the top of the session list. Each one remembers its last session. |
 | Notifications | Claude Code "needs your input" and "finished" (with its last reply), plus an optional terminal bell from any program. |
-| One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. |
+| One-scan pairing | Run `moor pair` on the host and scan the QR code: the app fills in the connection and registers its key in one step. To add a tablet or a second phone, use Settings, Set up another device on the first one and scan its code: every machine and the settings come over, and the new device registers its own key. |
 | Voice input | Tap the mic beside the input box and talk: the text appears in the box as you speak, ready to edit and send, without opening the keyboard. Uses Volcengine (Doubao) streaming speech recognition with your own key. |
 | Images | Send a photo or screenshot to the session (photos, camera, or share from another app). It is copied to the machine and its path typed in, which Claude Code reads as an image. |
 | Phone-first input | Two rows at the bottom: named keys that scroll sideways (Paste, Esc, Tab, Enter, Shift+Tab, arrows, Ctrl, Alt, …), and an input box where you type or dictate a whole line with the normal keyboard, then send it. A sheet holds symbols and Ctrl combos; the keyboard key types straight into the terminal. The title bar is hidden by default (turn it on in the sheet); the first key opens the session list. |
@@ -97,6 +97,7 @@ SSH connection ───── attach ───────▶ moor attach ─�
 - When the helper is updated, the running daemon swaps in the new code without stopping any session.
 - Images go to `~/.cache/moor/uploads` on the machine; files older than a week are removed.
 - Pairing: `moor pair` adds a throwaway key to `authorized_keys` with `expiry-time`, `restrict` and `command=` so it can only run `moor claim`. The QR code carries the host, the host key and the throwaway key's seed. The phone logs in once, hands over its own public key, and the throwaway key is removed. The host key from the QR code is pinned, so there is no trust-on-first-use prompt.
+- Setting up another device: the configured device logs in to each machine with its own key and runs `moor invite`, which adds the same kind of throwaway key (made on the device). The QR code carries one such pairing link per machine plus the app settings, deflated; the new device claims each link with its own key. No private key is copied.
 - The private key is generated on the phone and never leaves it.
 
 ## Build

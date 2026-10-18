@@ -60,6 +60,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="moor" android:host="pair" />
+                <data android:scheme="moor" android:host="setup" />
             </intent-filter>
         </activity>
 
