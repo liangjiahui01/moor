@@ -18,6 +18,9 @@ import com.termux.terminal.WcWidth;
  */
 public final class TerminalRenderer {
 
+    /** How much larger CJK (two cells, narrower than them) is drawn than the font's own size. */
+    private static final float CJK_GROW = 1.1f;
+
     final int mTextSize;
     final Typeface mTypeface;
     /** Real bold face; null falls back to fake bold. */
@@ -226,7 +229,11 @@ public final class TerminalRenderer {
         mes = mes / mFontWidth;
         float textShift = 0, sx = 1, sy = 1;
         if (mes < runWidthColumns - 0.01 && mes > runWidthColumns / 2f) {
-            textShift = (runWidthColumns - mes) * mFontWidth / 2;
+            // CJK is drawn a little larger (keeping its shape) so it fills more of its two cells: centred at its
+            // own size it left a fifth of an em between characters, which read as letter-spaced text
+            float grow = runWidthColumns == 2 ? Math.min(CJK_GROW, runWidthColumns / mes) : 1;
+            sx = sy = grow;
+            textShift = (runWidthColumns - mes * grow) * mFontWidth / 2 / grow;
         } else if (Math.abs(mes - runWidthColumns) > 0.01) {
             sx = runWidthColumns / mes;
             if (sx < 1) sy = sx;

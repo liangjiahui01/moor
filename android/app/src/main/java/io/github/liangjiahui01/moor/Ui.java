@@ -53,7 +53,9 @@ final class Ui {
     }
 
     static Typeface monoBold(Context c) {
-        if (monoBold == null) monoBold = termFace(c, "JetBrainsMono-Bold.ttf", true);
+        // Bold is SemiBold for Latin and 500 for the system's CJK: at terminal sizes a 700 weight clots into
+        // blobs, and some systems (Xiaomi's MiSans) draw 600 exactly like 700
+        if (monoBold == null) monoBold = termFace(c, "JetBrainsMono-SemiBold.ttf", true);
         return monoBold;
     }
 
@@ -69,7 +71,7 @@ final class Ui {
                         new android.graphics.fonts.Font.Builder(am, "term-fonts/" + f).build()).build());
                 }
                 return b.setSystemFallback("sans-serif")
-                    .setStyle(new android.graphics.fonts.FontStyle(bold ? 700 : 400, android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT))
+                    .setStyle(new android.graphics.fonts.FontStyle(bold ? 500 : 400, android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT))
                     .build();
             } catch (Exception e) {
                 // fall through to the plain font
