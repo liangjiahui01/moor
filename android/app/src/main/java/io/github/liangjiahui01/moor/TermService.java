@@ -205,9 +205,12 @@ public class TermService extends Service {
             final SshLink l = link;
             if (screen != null) screen.onProbe(true);
             // Own thread: a probe hanging on a dead link must not hold up the reconnect behind it
+            // A live link answers in two round trips; waiting the full 1.5 s on a dead one only delays the reconnect
+            Rtc.Proxy px = l.proxy();
+            final int limit = px != null && px.rttMs > 0 ? Math.max(600, Math.min(1_500, px.rttMs * 4 + 300)) : 1_500;
             new Thread(() -> {
                 long p0 = SystemClock.elapsedRealtime();
-                boolean ok = l.probe();
+                boolean ok = l.probe(limit);
                 Diag.i(TAG, "probe " + (ok ? "ok" : "failed") + " in " + (SystemClock.elapsedRealtime() - p0) + "ms");
                 if (!ok) {
                     Diag.i(TAG, "probe failed after resume");

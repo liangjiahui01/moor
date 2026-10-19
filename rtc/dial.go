@@ -28,6 +28,7 @@ func dialMain(args []string) {
 	fallback := fs.String("fallback", "", "HOST:PORT to use when no direct path is found")
 	stun := fs.String("stun", defaultSTUN, "STUN servers")
 	timeout := fs.Duration("timeout", 10*time.Second, "how long to try a direct path")
+	iceTimeout := fs.Duration("ice-timeout", 3*time.Second, "give up this try when no path answers this long (the app tries again at once)")
 	route := fs.String("route", "auto", "auto (first path that works), lan (private addresses only) or wan (public only)")
 	fs.Parse(args)
 	if *keyStr == "" {
@@ -36,7 +37,7 @@ func dialMain(args []string) {
 	useBuiltinDNS()
 	androidNetwork()
 
-	err := direct(*signal, *roomID, *keyStr, *stun, *timeout, *route)
+	err := direct(*signal, *roomID, *keyStr, *stun, *timeout, *iceTimeout, *route)
 	if err == nil {
 		os.Exit(0)
 	}
@@ -47,7 +48,7 @@ func dialMain(args []string) {
 	if *fallback == "" {
 		os.Exit(1)
 	}
-	tcp, err := net.DialTimeout("tcp", *fallback, 10*time.Second)
+	tcp, err := net.DialTimeout("tcp", *fallback, 4*time.Second)
 	if err != nil {
 		logf("fallback: %v", err)
 		os.Exit(1)
@@ -79,7 +80,7 @@ func reportRTT(pc *webrtc.PeerConnection) {
 // direct asks the machine (through the relay) to offer a data channel, answers it and, once it
 // is open, carries stdin/stdout over it until either side ends (returns errEnded then). Any error
 // before the channel opens means: try the fallback.
-func direct(signal, roomID, keyStr, stun string, timeout time.Duration, route string) error {
+func direct(signal, roomID, keyStr, stun string, timeout, iceTimeout time.Duration, route string) error {
 	if signal == "" || roomID == "" || keyStr == "" {
 		return errors.New("not configured")
 	}
@@ -125,8 +126,13 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration, route st
 	}
 	opened := make(chan *webrtc.DataChannel, 1)
 	failed := make(chan struct{})
+	iceUp := make(chan struct{})
+	var upOnce sync.Once
 	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
 		logf("ice %s", s)
+		if s == webrtc.ICEConnectionStateConnected {
+			upOnce.Do(func() { close(iceUp) })
+		}
 		if s == webrtc.ICEConnectionStateFailed {
 			select {
 			case <-failed:
@@ -197,15 +203,29 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration, route st
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
+	// Right after the phone wakes its network is often not ready, and a try that started then rarely
+	// recovers: a fresh one a moment later usually connects within 1-2 s. So a try with no path after
+	// iceTimeout ends; once a path answers, the channel gets until the overall deadline.
+	iceWait := time.NewTimer(iceTimeout)
+	defer iceWait.Stop()
+	up := iceUp
 	var dc *webrtc.DataChannel
-	select {
-	case dc = <-opened:
-	case <-failed:
-		pc.Close()
-		return errors.New("no direct path")
-	case <-ctx.Done():
-		pc.Close()
-		return errors.New("no direct path in time")
+	for dc == nil {
+		select {
+		case dc = <-opened:
+		case <-up:
+			iceWait.Stop()
+			up = nil
+		case <-iceWait.C:
+			pc.Close()
+			return errors.New("no path answered in " + iceTimeout.String())
+		case <-failed:
+			pc.Close()
+			return errors.New("no direct path")
+		case <-ctx.Done():
+			pc.Close()
+			return errors.New("no direct path in time")
+		}
 	}
 	c.Close()
 	ch, err := newChannel(dc)

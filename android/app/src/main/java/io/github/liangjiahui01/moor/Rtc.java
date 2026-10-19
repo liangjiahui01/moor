@@ -79,6 +79,14 @@ final class Rtc {
         return old;
     }
 
+    private static final String[] ICE_WAITS = {"3s", "6s", "10s"};
+    /** Tries in a row that ended with no path answering. */
+    private static volatile int slowTries;
+
+    /** Fallback addresses that failed recently, until when they are skipped. */
+    private static final java.util.Map<String, Long> deadFallbacks = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long FALLBACK_REST_MS = 5 * 60_000L;
+
     /** JSch proxy: the SSH stream is moor-rtc's stdin/stdout; host:port is where it falls back to. */
     static final class Proxy implements com.jcraft.jsch.Proxy {
         private final File bin;
@@ -103,9 +111,21 @@ final class Rtc {
 
         @Override
         public void connect(com.jcraft.jsch.SocketFactory sf, String host, int port, int timeout) throws Exception {
-            String fallback = (host.contains(":") ? "[" + host + "]" : host) + ":" + port;
-            ProcessBuilder pb = new ProcessBuilder(bin.getAbsolutePath(), "dial", "--signal", signal, "--room", room,
-                "--fallback", fallback, "--route", routePref);
+            final String fallback = (host.contains(":") ? "[" + host + "]" : host) + ":" + port;
+            java.util.List<String> cmd = new java.util.ArrayList<>(java.util.Arrays.asList(bin.getAbsolutePath(), "dial",
+                "--signal", signal, "--room", room, "--route", routePref,
+                // A try with no answering path ends after 3 s (a fresh one usually connects at once); on a
+                // network that is just slow, each failure in a row gives the next try longer
+                "--ice-timeout", ICE_WAITS[Math.min(slowTries, ICE_WAITS.length - 1)]));
+            // The fallback is a plain connection to the machine's address: not when a route is chosen, and
+            // not again soon after it failed (a dead one cost every failed try 10 more seconds)
+            Long dead = deadFallbacks.get(fallback);
+            boolean useFallback = "auto".equals(routePref) && (dead == null || android.os.SystemClock.elapsedRealtime() > dead);
+            if (useFallback) {
+                cmd.add("--fallback");
+                cmd.add(fallback);
+            }
+            ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.environment().put("MOOR_RTC_KEY", key);
             pb.environment().put("MOOR_ANDROID_SDK", String.valueOf(android.os.Build.VERSION.SDK_INT));
             proc = pb.start();
@@ -120,8 +140,12 @@ final class Rtc {
                             path = pathOf(line);
                         } else if (line.contains(" rtt ")) rttMs = rttOf(line, rttMs);
                         else if (line.contains("route relay")) route = "relay";
+                        else if (line.contains(" fallback: ")) deadFallbacks.put(fallback, android.os.SystemClock.elapsedRealtime() + FALLBACK_REST_MS);
                         else if (line.endsWith("ice disconnected") || line.endsWith("ice failed")) pathDown = true;
-                        else if (line.endsWith("ice connected")) pathDown = false;
+                        else if (line.endsWith("ice connected")) {
+                            pathDown = false;
+                            slowTries = 0;
+                        } else if (line.contains("no path answered")) slowTries++;
                     }
                 } catch (Exception ignored) {
                 }

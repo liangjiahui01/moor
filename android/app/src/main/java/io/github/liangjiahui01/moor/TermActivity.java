@@ -1071,6 +1071,23 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         return p.rttMs > 0 ? getString(R.string.route_now_rtt, path, p.rttMs) : getString(R.string.route_now, path);
     }
 
+    /**
+     * Once: ask to be left out of battery optimization. Without it some systems (Xiaomi) freeze the app
+     * about 10 s after the screen locks, the machine drops the connection, and every unlock reconnects.
+     */
+    private void maybeAskBattery() {
+        if (isFinishing() || Prefs.raw(this).getBoolean("asked_battery", false)) return;
+        android.os.PowerManager pm = getSystemService(android.os.PowerManager.class);
+        if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+        Prefs.put(this, "asked_battery", true);
+        try {
+            startActivity(new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:" + getPackageName())));
+        } catch (Exception e) {
+            Diag.w("TermActivity", "battery request: " + e);
+        }
+    }
+
     private void showVoiceSetup() {
         LinearLayout box = Ui.column(this);
         TextView title = Ui.text(this, getString(R.string.voice_setup_title), 20, t.text, Ui.SEMIBOLD);
@@ -1464,6 +1481,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         main.removeCallbacks(hideStatus);
         if (state == TermService.State.CONNECTED) {
             if (prev != null && prev != TermService.State.CONNECTED) {
+                main.postDelayed(this::maybeAskBattery, 1500);
                 // The message ends with " · direct" / " · via relay" for WebRTC connections
                 int dot = message == null ? -1 : message.lastIndexOf(" · ");
                 showStatus(getString(R.string.state_connected) + (dot < 0 ? "" : message.substring(dot)), t.ok);

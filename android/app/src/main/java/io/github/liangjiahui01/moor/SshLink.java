@@ -292,12 +292,17 @@ final class SshLink implements TerminalSession.Transport {
 
     /** Liveness check: opens a channel running `true`; if that doesn't open within 1.5 s the connection is dead. */
     boolean probe() {
+        return probe(1_500);
+    }
+
+    /** True when the machine answers within timeoutMs (opening a channel takes two round trips). */
+    boolean probe(int timeoutMs) {
         if (closed || !session.isConnected()) return false;
         ChannelExec exec = null;
         try {
             exec = (ChannelExec) session.openChannel("exec");
             exec.setCommand("true");
-            exec.connect(1_500);
+            exec.connect(timeoutMs);
             return true;
         } catch (Exception e) {
             return false;
