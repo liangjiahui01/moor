@@ -160,7 +160,7 @@ def invite(pid, minutes):
     print(f"ok {int(expires.timestamp())}")
 
 
-def host_key(ports):
+def host_key(ports, required=True):
     """(type, base64) of the host key this machine's sshd presents, asking sshd itself: a key file on disk is
     only used if sshd_config loads it. MOOR_HOST_KEY (a .pub file) overrides, e.g. for a second sshd."""
     override = os.environ.get("MOOR_HOST_KEY")
@@ -181,8 +181,14 @@ def host_key(ports):
         for t in HOST_KEY_TYPES:
             if t in keys:
                 return t, keys[t]
+    if not required:
+        return None
     sys.exit("Could not read this machine's SSH host key (ssh-keyscan localhost on port %s). "
              "If sshd listens on another port, pass --sshd-port." % "/".join(map(str, ports)))
+
+
+# The sshd that `moor-rtc host` connects data channels to (its --ssh default, 127.0.0.1:22)
+RTC_SSHD_PORT = 22
 
 
 def rtc_config():
@@ -200,7 +206,19 @@ def rtc_config():
 
 def pair(args):
     ports = [args.sshd_port] if args.sshd_port else list(dict.fromkeys([args.port, 22]))
-    hk_type, hk = host_key(ports)
+    if rtc_config() and not os.environ.get("MOOR_HOST_KEY"):
+        # Direct connections reach the sshd that moor-rtc host connects to (port 22 here, its default), so the
+        # code pins that one's key. The address in the code is only the fallback for when no direct path opens:
+        # if it leads to another sshd, its key differs and the phone would refuse it as a changed host key.
+        hk_type, hk = host_key([RTC_SSHD_PORT])
+        fallback = host_key(ports, required=False)
+        if fallback and fallback != (hk_type, hk):
+            print("moor: warning: direct connections reach the sshd on port %d, but the address in this code "
+                  "(port %d, used when no direct path opens) leads to an sshd with a different host key; the phone "
+                  "would refuse that fallback. Pair with --port %d, or with --sshd-port %d when the phone comes in "
+                  "through a forwarded port." % (RTC_SSHD_PORT, ports[0], RTC_SSHD_PORT, RTC_SSHD_PORT), file=sys.stderr)
+    else:
+        hk_type, hk = host_key(ports)
     pid = secrets.token_hex(4)
     expires = datetime.datetime.now() + datetime.timedelta(minutes=args.minutes)
     with tempfile.TemporaryDirectory() as d:
