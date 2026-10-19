@@ -1900,12 +1900,27 @@ def cmd_attach(name):
                 data = os.read(0, 65536)
                 if not data:
                     break
+                # Several devices can show one session; the one being used sets its size.
+                # Answers the device's terminal sends by itself don't count, or two idle devices would fight.
+                if not TERM_REPLIES.fullmatch(data):
+                    try:
+                        cols, rows = os.get_terminal_size(0)
+                        c.sendall(frame(b"R", json.dumps({"cols": cols, "rows": rows}).encode()))
+                    except OSError:
+                        pass
                 c.sendall(frame(b"D", data))
     except OSError:
         pass
     finally:
         if saved:
             termios.tcsetattr(0, termios.TCSADRAIN, saved)
+
+
+# What a terminal sends on its own: device attributes, status and cursor reports, mode reports,
+# OSC and DCS answers, window size reports, keyboard flags, focus out
+TERM_REPLIES = re.compile(rb"(?:\x1b\[[?>]?[\d;]*c|\x1b\[\d*n|\x1b\[\d+;\d+R|\x1b\[\??[\d;]*\$y"
+                          rb"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\|\x1b\[[\d;]+t"
+                          rb"|\x1b\[\?\d*u|\x1b\[O)+")
 
 
 def write_all(fd, data):
