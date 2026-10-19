@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * What a tap on the terminal points at: a web link, or text that may name a file on the machine.
+ * What a tap on the terminal points at: text that may name a file on the machine.
  * Programs wrap long paths onto the next line, so a token that touches a line's edge is also tried joined
  * with the text across that edge; the machine keeps the first that exists.
  */
@@ -17,8 +17,6 @@ final class PathTap {
     private PathTap() {}
 
     static final class Hit {
-        /** A web link to open in the browser, or null. */
-        String url;
         /** Texts that may name a file, best guess first. */
         final List<String> cands = new ArrayList<>();
         /** The tapped token, for messages. */
@@ -31,24 +29,9 @@ final class PathTap {
     static Hit at(TerminalBuffer b, int col, int row, int cols, int rows) {
         if (col < 0 || col >= cols || row >= rows || row < -b.getActiveTranscriptRows()) return null;
         Hit h = new Hit();
-        Span url = token(b, col, row, cols, true);
-        if (url != null) {
-            String u = url.text;
-            int i = u.indexOf("https://");
-            if (i < 0) i = u.indexOf("http://");
-            if (i >= 0) {
-                // A link wraps only when it fills its line to the edge
-                String full = (url.startsAtEdge ? prevTail(b, row, cols, true, true) : "") + url.text
-                    + (url.endsAtEdge ? nextHead(b, row, cols, rows, true, true) : "");
-                int j = full.indexOf("https://");
-                if (j < 0) j = full.indexOf("http://");
-                h.url = trimEnd(full.substring(Math.max(j, 0)), ".,;:!?'\")]>");
-                h.label = h.url;
-                return h;
-            }
-        }
         Span p = token(b, col, row, cols, false);
-        if (p == null) return null;
+        // Web links are left alone (no browser from a tap), and must not be looked up as files either
+        if (p == null || p.text.contains("://")) return null;
         String prev = p.startsAtEdgeLoose ? prevTail(b, row, cols, false, false) : "";
         String next = p.endsAtEdgeLoose ? nextHead(b, row, cols, rows, false, false) : "";
         Set<String> out = new LinkedHashSet<>();

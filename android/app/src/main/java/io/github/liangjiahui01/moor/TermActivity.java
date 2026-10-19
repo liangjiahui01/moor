@@ -1452,7 +1452,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         files().showChanges();
     }
 
-    /** A tap on a link opens the browser; on a file path, the preview. Other taps do what they did. */
+    /** A tap on a file path opens the preview. Other taps do what they did. */
     private void tapLink(MotionEvent e) {
         if (service == null || service.state() != TermService.State.CONNECTED || panel.shown()) return;
         com.termux.terminal.TerminalEmulator em = service.term.getEmulator();
@@ -1466,14 +1466,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             return;
         }
         if (h == null) return;
-        if (h.url != null) {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(h.url)));
-            } catch (Exception ex) {
-                Toast.makeText(this, getString(R.string.files_failed, ex.getMessage()), Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
         files().openTapped(h);
     }
 
