@@ -1147,7 +1147,30 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         bubble.setVisibility(minimal ? View.VISIBLE : View.GONE);
         getWindow().setNavigationBarColor(minimal ? t.terminalBg() : t.keyBar);
         styleBubble();
+        wakeBubble();
         termBox.post(this::placeBubble);
+    }
+
+    // Left alone, the bubble fades so the text under it shows; a touch brings it back and still counts.
+    private static final long BUBBLE_IDLE_MS = 3000;
+    private static final float BUBBLE_IDLE_ALPHA = 0.3f;
+    private android.animation.ObjectAnimator bubbleFade;
+    private boolean bubbleWasOn;
+    private final Runnable bubbleIdle = () -> {
+        if (bubble == null || !minimal || voice != null || bubbleDrag) return;
+        if (bubbleFade != null) bubbleFade.cancel();
+        bubbleFade = android.animation.ObjectAnimator.ofFloat(bubble, View.ALPHA, bubble.getAlpha(), BUBBLE_IDLE_ALPHA);
+        bubbleFade.setDuration(800);
+        bubbleFade.start();
+    };
+
+    /** Full strength now; fades again after a while unless dictation is on. */
+    private void wakeBubble() {
+        if (bubble == null) return;
+        main.removeCallbacks(bubbleIdle);
+        if (bubbleFade != null) bubbleFade.cancel();
+        bubble.setAlpha(1f);
+        if (minimal && voice == null) main.postDelayed(bubbleIdle, BUBBLE_IDLE_MS);
     }
 
     private void placeBubble() {
@@ -1179,6 +1202,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void styleBubble() {
         if (bubble == null || input == null) return;
         boolean on = voice != null;
+        if (on != bubbleWasOn) {
+            bubbleWasOn = on;
+            wakeBubble();
+        }
         int fill = holdCancel && holding ? t.red : on ? t.accent : (t.key & 0x00ffffff) | 0xe6000000;
         bubble.setBackground(on ? Ui.round(fill, dp(28)) : Ui.outline(fill, t.line, dp(1), dp(28)));
         View icon = bubble.getChildAt(0);
@@ -1227,6 +1254,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private boolean onBubbleTouch(View v, MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                wakeBubble();
                 bubbleDrag = false;
                 bubbleLongDone = false;
                 holdX = e.getRawX();
@@ -1248,6 +1276,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 main.removeCallbacks(bubbleLongPress);
+                wakeBubble();
                 if (bubbleDrag) {
                     bubbleDrag = false;
                     saveBubble();
