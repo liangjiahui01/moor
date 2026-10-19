@@ -94,6 +94,10 @@ journalctl --user -u moor-rtc -f          # "connected to relay" means it's up
 
 Run `moor pair` on the host again and scan the code. The link now carries the relay address, room and key, and every connection to this machine tries the direct path first.
 
+The machine address in the pairing (`--host`, `--port`) is the fallback for when no direct path opens, so it has to reach the sshd that `moor-rtc host` connects to (port 22 on the host by default). The code pins that sshd's host key; if the fallback address leads to a different sshd (one you started on port 2222, say), the two paths present different host keys and the app refuses the fallback as a changed host key. When the phone comes in through a forwarded port, pass `--sshd-port` with the host's sshd port.
+
+Pair each host once. A direct-connection machine goes over both the private network and the internet; there is no need for a second entry for the private network.
+
 ## Fallback path (optional)
 
 When no direct path exists (both sides behind symmetric NAT, or UDP blocked), the app connects to the machine address from pairing instead. If that address can't be reached from outside either, a reverse tunnel on the relay server can stand in for it, at the cost of routing traffic through that server.
@@ -144,12 +148,13 @@ moor pair --host RELAY_ADDRESS --port 2022 --sshd-port 22
 
 ## Which path is in use
 
-- App: the status reads "Connected · direct", or "Connected · via relay" when it used the fallback address.
+- App: the status reads "Connected · direct", or "Connected · via relay" when it used the fallback address. » panel → Route shows whether the path is private or internet and its round-trip time, and can pin one: the private network (LAN, office network, VPN) is often steadier at the office, peer to peer over the internet suits being out.
 - Host: `journalctl --user -u moor-rtc` logs `connected, host … <-> srflx …` for each connection, then `rtt N ms` every 30 seconds, and why it closed.
 - Phone: `adb logcat -s MoorRtc` shows `route direct …` or `route relay …`.
 
 ## Drops and reconnects
 
 - Both sides send a keepalive every 2 seconds. After 4 seconds of silence the path counts as disconnected; after 8 it has failed and the app reconnects at once.
+- A try that gets no answer on any path within 3 seconds is dropped and started again (right after the phone wakes its network is often not ready, and a fresh try usually connects in a second or two); tries that keep failing wait longer, 6 then 10 seconds. A fallback address that failed is not tried again for 5 minutes.
 - When the phone switches networks (Wi-Fi and mobile data), the app reconnects as soon as Android reports the change, without waiting for a timeout.
 - Each reconnect goes through the relay again: a network change can change both sides' public addresses, so they need a fixed place to meet. That step usually takes under a second; the whole reconnect, to a usable terminal, takes about 2 seconds, the rest going to opening the direct path and logging in over SSH.

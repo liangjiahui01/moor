@@ -60,9 +60,13 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 
 主机在 NAT 后面（公司或云上的内网）、手机在别处时，Moor 可以用 WebRTC 让两边直接连通。你在一台公网服务器上跑一个小中继，它只在每次连接时帮两边交换地址；连上后 SSH 在手机和主机之间点对点传输，中继看不到内容。
 
+这一步是可选的：手机能连到主机的 SSH 端口（同一局域网、VPN）时不需要中继。一个中继可以服务多台主机，已经有中继时，新主机只做第 2、3 步。
+
 1. 公网服务器上运行 `moor-rtc relay --listen :80`。
-2. 主机上运行 `moor-rtc init --signal ws://中继地址/ws`，再常驻运行 `moor-rtc host`。
+2. 主机上从 [Releases](https://github.com/liangjiahui01/moor/releases) 下载 `moor-rtc-linux-amd64`（ARM 用 `arm64`）放到 `~/.local/bin/moor-rtc`，运行 `moor-rtc init --signal ws://中继地址/ws`，再常驻运行 `moor-rtc host`。
 3. 重新 `moor pair` 配对。
+
+直连有两条路可走：内网（同一局域网、公司网络、VPN）或公网点对点。应用默认用先打通的那条，也可以在 » 面板的「线路」里固定成内网或公网，面板上显示当前走的路和往返延迟。
 
 完整步骤（systemd 服务写法、打不通直连时的备用隧道、安全说明、怎么看走的哪条路）见 [docs/remote-access.zh-CN.md](docs/remote-access.zh-CN.md)。
 

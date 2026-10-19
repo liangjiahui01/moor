@@ -60,9 +60,13 @@ Prefer to do it by hand? Fill in host, port and user in Settings, then copy the 
 
 When the host sits behind NAT (an office or cloud network) and the phone is elsewhere, Moor can connect the two directly over WebRTC. A small relay you run on a public server lets them swap addresses for each connection; after that SSH flows peer to peer, and the relay never sees it.
 
+This is optional: no relay is needed when the phone can reach the host's SSH port (same LAN, VPN). One relay serves any number of hosts; with a relay already running, a new host only needs steps 2 and 3.
+
 1. On the public server, run `moor-rtc relay --listen :80`.
-2. On the host, run `moor-rtc init --signal ws://RELAY_ADDRESS/ws`, then keep `moor-rtc host` running.
+2. On the host, download `moor-rtc-linux-amd64` (or `arm64`) from [Releases](https://github.com/liangjiahui01/moor/releases) to `~/.local/bin/moor-rtc`, run `moor-rtc init --signal ws://RELAY_ADDRESS/ws`, then keep `moor-rtc host` running.
 3. Pair again with `moor pair`.
+
+A direct connection can go over the private network (same LAN, office network, VPN) or peer to peer over the internet. The app takes whichever opens first; » panel → Route pins it to one, and shows the path in use and its round-trip time.
 
 The full guide (systemd units, a fallback tunnel for when no direct path exists, security, and how to tell which path is in use) is in [docs/remote-access.md](docs/remote-access.md).
 
