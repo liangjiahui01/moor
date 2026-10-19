@@ -331,13 +331,44 @@ public final class TerminalView extends View {
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
 
         return new BaseInputConnection(this, true) {
+            // Moor: the IME's current word as already sent to the terminal. Some keyboards (Doubao in English)
+            // finish the composition after every key and then compose the whole word again ("o", "om",
+            // "omp"), so sending each finished composition typed "oomomp". Only the change is sent now:
+            // new characters, or deletes when the word got shorter. The word ends when the IME commits.
+            private String sent = "";
+            private boolean composing;
+            // Such a keyboard only finishes a word on the next key, so its letters showed one key late. Once it
+            // is seen recomposing a word it finished, compositions are sent as they change. (Pinyin keyboards
+            // never do that, so their letters are not typed into the terminal.)
+            private boolean live;
+
+            private void sendChange(String text) {
+                int common = 0, max = Math.min(text.length(), sent.length());
+                while (common < max && text.charAt(common) == sent.charAt(common)) common++;
+                if (common > 0 && Character.isHighSurrogate(text.charAt(common - 1))) common--;
+                int deletes = sent.codePointCount(common, sent.length());
+                KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
+                for (int i = 0; i < deletes; i++) super.sendKeyEvent(deleteKey);
+                if (common < text.length()) sendTextToTerminal(text.substring(common));
+                sent = text;
+            }
+
+            @Override
+            public boolean setComposingText(CharSequence text, int newCursorPosition) {
+                if (!composing && !sent.isEmpty() && text.toString().startsWith(sent)) live = true;
+                composing = true;
+                boolean r = super.setComposingText(text, newCursorPosition);
+                if (live && mEmulator != null) sendChange(getEditable().toString());
+                return r;
+            }
 
             @Override
             public boolean finishComposingText() {
                 if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
                 super.finishComposingText();
-
-                sendTextToTerminal(getEditable());
+                // A finish with nothing composed since the last one must not read as "the word is now empty"
+                if (composing && mEmulator != null) sendChange(getEditable().toString());
+                composing = false;
                 getEditable().clear();
                 return true;
             }
@@ -352,9 +383,24 @@ public final class TerminalView extends View {
                 if (mEmulator == null) return true;
 
                 Editable content = getEditable();
-                sendTextToTerminal(content);
+                // The committed text replaces the current word, part of which may already be on screen
+                sendChange(content.toString());
+                sent = "";
+                composing = false;
                 content.clear();
                 return true;
+            }
+
+            @Override
+            public boolean sendKeyEvent(KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
+                        if (!sent.isEmpty()) sent = sent.substring(0, sent.offsetByCodePoints(sent.length(), -1));
+                    } else {
+                        sent = "";
+                    }
+                }
+                return super.sendKeyEvent(event);
             }
 
             @Override
@@ -364,7 +410,9 @@ public final class TerminalView extends View {
                 }
                 // The stock Samsung keyboard with 'Auto check spelling' enabled sends leftLength > 1.
                 KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
-                for (int i = 0; i < leftLength; i++) sendKeyEvent(deleteKey);
+                for (int i = 0; i < leftLength; i++) super.sendKeyEvent(deleteKey);
+                int keep = Math.max(0, sent.codePointCount(0, sent.length()) - leftLength);
+                sent = sent.substring(0, sent.offsetByCodePoints(0, keep));
                 return super.deleteSurroundingText(leftLength, rightLength);
             }
 
