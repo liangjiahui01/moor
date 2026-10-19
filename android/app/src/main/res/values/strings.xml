@@ -277,7 +277,7 @@
     <string name="hold_send">Release to send · ↑ cancel · → lock</string>
     <string name="hold_lock">Release to lock</string>
     <string name="hold_locked">Listening… tap send to finish</string>
-    <string name="hold_locked_bubble">Listening: tap the bubble to send, tap here to cancel</string>
+    <string name="hold_locked_bubble">Listening: tap the bubble when done, tap here to cancel</string>
     <string name="hold_cancel">Release to cancel</string>
     <string name="k_route">Route</string>
     <string name="route_title">Route</string>
@@ -314,4 +314,9 @@
     <string name="dir_no_projects">No git repositories within three levels of home</string>
     <string name="dir_empty">No subfolders</string>
     <string name="dir_pick_here">Use this folder: %1$s</string>
+    <string name="bubble_review">Check before sending:</string>
+    <string name="bubble_cancel">Cancel</string>
+    <string name="bubble_edit">Edit</string>
+    <string name="bubble_send">Send</string>
+    <string name="bubble_edit_title">Edit, then send</string>
 </resources>

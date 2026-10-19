@@ -261,7 +261,7 @@
     <string name="hold_send">松手发送，↑取消 →锁定</string>
     <string name="hold_lock">松手锁定</string>
     <string name="hold_locked">正在听，点发送结束</string>
-    <string name="hold_locked_bubble">正在听：点圆圈发送，点这里取消</string>
+    <string name="hold_locked_bubble">正在听：点圆圈说完，点这里取消</string>
     <string name="hold_cancel">松手取消</string>
     <string name="k_route">线路</string>
     <string name="route_title">线路</string>
@@ -298,4 +298,9 @@
     <string name="dir_no_projects">主目录下三层内没有 git 仓库</string>
     <string name="dir_empty">没有子目录</string>
     <string name="dir_pick_here">选这个目录：%1$s</string>
+    <string name="bubble_review">识别结果，确认后再发：</string>
+    <string name="bubble_cancel">取消</string>
+    <string name="bubble_edit">修改</string>
+    <string name="bubble_send">发送</string>
+    <string name="bubble_edit_title">修改后发送</string>
 </resources>

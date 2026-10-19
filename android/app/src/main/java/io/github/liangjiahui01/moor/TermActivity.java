@@ -958,14 +958,17 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             @Override
             public void onDone(String text) {
                 showTranscript(text);
-                boolean send = sendWhenDone;
+                boolean send = sendWhenDone, review = reviewWhenDone;
                 endVoice();
-                if (send && !input.getText().toString().trim().isEmpty()) sendInput();
+                if (review) enterReview();
+                else if (send && !input.getText().toString().trim().isEmpty()) sendInput();
             }
 
             @Override
             public void onError(String message) {
+                boolean review = reviewWhenDone;
                 endVoice();
+                if (review) enterReview();
                 Toast.makeText(TermActivity.this, getString(R.string.voice_failed, message), Toast.LENGTH_LONG).show();
             }
         });
@@ -989,6 +992,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void endVoice() {
         voice = null;
         sendWhenDone = false;
+        reviewWhenDone = false;
         locked = false;
         holdLock = false;
         if (sendBtn != null) {
@@ -1107,6 +1111,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private boolean minimal, bubbleDrag;
     private FrameLayout bubble;
     private TextView bubblePreview;
+    /** The card beside the bubble: live words while talking, then the result with cancel / edit / send. */
+    private LinearLayout bubbleCard, bubbleActions;
+    /** Dictation stopped from the bubble: the words wait on the card until sent, edited or dropped. */
+    private boolean reviewing, reviewWhenDone;
     private float bubbleX0, bubbleY0;
 
     private void buildBubble() {
@@ -1116,14 +1124,31 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         bubble.setElevation(dp(6));
         bubble.setOnTouchListener(this::onBubbleTouch);
         termBox.addView(bubble, new FrameLayout.LayoutParams(dp(56), dp(56)));
+        bubbleCard = Ui.column(this);
+        bubbleCard.setBackground(Ui.outline(t.sheet, t.accent, dp(1), dp(14)));
+        bubbleCard.setPadding(dp(14), dp(10), dp(14), dp(10));
+        bubbleCard.setElevation(dp(6));
+        bubbleCard.setVisibility(View.GONE);
+        bubbleCard.setOnClickListener(v -> cancelBubbleVoice());
         bubblePreview = Ui.text(this, "", 14, t.text, Ui.REGULAR);
-        bubblePreview.setBackground(Ui.outline(t.sheet, t.accent, dp(1), dp(14)));
-        bubblePreview.setPadding(dp(14), dp(10), dp(14), dp(10));
         bubblePreview.setLineSpacing(dp(3), 1f);
-        bubblePreview.setElevation(dp(6));
-        bubblePreview.setVisibility(View.GONE);
-        bubblePreview.setOnClickListener(v -> cancelBubbleVoice());
-        termBox.addView(bubblePreview, new FrameLayout.LayoutParams(-2, -2));
+        bubblePreview.setMaxLines(12);
+        bubblePreview.setEllipsize(android.text.TextUtils.TruncateAt.START);
+        bubbleCard.addView(bubblePreview);
+        bubbleActions = Ui.row(this);
+        bubbleActions.setPadding(0, dp(10), 0, 0);
+        TextView cancel = smallButton(getString(R.string.bubble_cancel), this::cancelReview);
+        TextView edit = smallButton(getString(R.string.bubble_edit), this::editReview);
+        TextView send = smallButton(getString(R.string.bubble_send), this::sendReview);
+        send.setTextColor(t.onAccent);
+        send.setBackground(Ui.pressable(t, Ui.round(t.accent, dp(9)), dp(9)));
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(72), dp(36));
+        alp.rightMargin = dp(8);
+        bubbleActions.addView(cancel, alp);
+        bubbleActions.addView(edit, new LinearLayout.LayoutParams(alp));
+        bubbleActions.addView(send, new LinearLayout.LayoutParams(dp(72), dp(36)));
+        bubbleCard.addView(bubbleActions);
+        termBox.addView(bubbleCard, new FrameLayout.LayoutParams(-2, -2));
         // Keep its spot (as a share of the free space) through rotation and the keyboard opening
         termBox.addOnLayoutChangeListener((v, l, tp, r, b, ol, ot, or, ob) -> {
             if (r - l != or - ol || b - tp != ob - ot) placeBubble();
@@ -1133,6 +1158,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private void toggleMinimal() {
         minimal = !minimal;
+        reviewing = false;
         Prefs.put(this, "minimal", minimal);
         setMore(false);
         if (minimal) {
@@ -1157,7 +1183,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private android.animation.ObjectAnimator bubbleFade;
     private boolean bubbleWasOn;
     private final Runnable bubbleIdle = () -> {
-        if (bubble == null || !minimal || voice != null || bubbleDrag) return;
+        if (bubble == null || !minimal || voice != null || reviewing || bubbleDrag) return;
         if (bubbleFade != null) bubbleFade.cancel();
         bubbleFade = android.animation.ObjectAnimator.ofFloat(bubble, View.ALPHA, bubble.getAlpha(), BUBBLE_IDLE_ALPHA);
         bubbleFade.setDuration(800);
@@ -1170,7 +1196,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         main.removeCallbacks(bubbleIdle);
         if (bubbleFade != null) bubbleFade.cancel();
         bubble.setAlpha(1f);
-        if (minimal && voice == null) main.postDelayed(bubbleIdle, BUBBLE_IDLE_MS);
+        if (minimal && voice == null && !reviewing) main.postDelayed(bubbleIdle, BUBBLE_IDLE_MS);
     }
 
     private void placeBubble() {
@@ -1202,8 +1228,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void styleBubble() {
         if (bubble == null || input == null) return;
         boolean on = voice != null;
-        if (on != bubbleWasOn) {
-            bubbleWasOn = on;
+        if ((on || reviewing) != bubbleWasOn) {
+            bubbleWasOn = on || reviewing;
             wakeBubble();
         }
         int fill = holdCancel && holding ? t.red : on ? t.accent : (t.key & 0x00ffffff) | 0xe6000000;
@@ -1213,35 +1239,38 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (icon instanceof android.widget.ImageView) {
             ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
         }
-        if (!minimal || !on) {
-            bubblePreview.setVisibility(View.GONE);
+        if (!minimal || !(on || reviewing)) {
+            bubbleCard.setVisibility(View.GONE);
             return;
         }
-        String hint = input.getHint() == null ? "" : input.getHint().toString();
+        bubbleActions.setVisibility(reviewing ? View.VISIBLE : View.GONE);
+        bubbleCard.setClickable(!reviewing);
+        String hint = reviewing ? getString(R.string.bubble_review)
+            : input.getHint() == null ? "" : input.getHint().toString();
         String text = input.getText().toString();
-        // The latest words matter most: keep the tail of a long transcript
-        if (text.length() > 140) text = "…" + text.substring(text.length() - 140);
+        // While talking the latest words matter most: keep the tail of a long transcript
+        if (!reviewing && text.length() > 140) text = "…" + text.substring(text.length() - 140);
         android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder(hint);
         sb.setSpan(new android.text.style.ForegroundColorSpan(holdCancel && holding ? t.red : t.faint), 0, hint.length(), 0);
         sb.setSpan(new android.text.style.RelativeSizeSpan(0.85f), 0, hint.length(), 0);
         if (!text.isEmpty()) sb.append("\n").append(text);
         bubblePreview.setText(sb);
-        bubblePreview.setVisibility(View.VISIBLE);
+        bubbleCard.setVisibility(View.VISIBLE);
         placePreview();
     }
 
     private void placePreview() {
-        if (bubblePreview == null || bubblePreview.getVisibility() != View.VISIBLE) return;
+        if (bubbleCard == null || bubbleCard.getVisibility() != View.VISIBLE) return;
         int w = termBox.getWidth(), gap = dp(10), m = dp(12);
         if (w == 0) return;
-        bubblePreview.measure(View.MeasureSpec.makeMeasureSpec(Math.min(w - 2 * m, dp(420)), View.MeasureSpec.AT_MOST),
+        bubbleCard.measure(View.MeasureSpec.makeMeasureSpec(Math.min(w - 2 * m, dp(420)), View.MeasureSpec.AT_MOST),
             View.MeasureSpec.UNSPECIFIED);
-        int pw = bubblePreview.getMeasuredWidth(), ph = bubblePreview.getMeasuredHeight();
+        int pw = bubbleCard.getMeasuredWidth(), ph = bubbleCard.getMeasuredHeight();
         float cx = bubble.getX() + dp(28);
-        bubblePreview.setX(Math.max(m, Math.min(cx - pw / 2f, w - m - pw)));
+        bubbleCard.setX(Math.max(m, Math.min(cx - pw / 2f, w - m - pw)));
         // Above the bubble when there is room, else below it
         float above = bubble.getY() - gap - ph;
-        bubblePreview.setY(above >= m ? above : bubble.getY() + dp(56) + gap);
+        bubbleCard.setY(above >= m ? above : bubble.getY() + dp(56) + gap);
     }
 
     private boolean bubbleLongDone;
@@ -1286,9 +1315,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
                 if (bubbleLongDone || e.getActionMasked() != MotionEvent.ACTION_UP) return true;
                 bubble.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
                 if (voice == null) {
-                    startBubbleVoice();
+                    if (reviewing) sendReview();
+                    else startBubbleVoice();
                 } else if (locked) {
-                    sendInput(); // the last words land, then it sends
+                    // Stop, and let the words wait on the card: a wrong word is caught before it goes out
+                    reviewWhenDone = true;
+                    setInputHint(R.string.voice_finishing);
+                    voice.stop();
+                    styleBubble();
                 }
                 return true;
             }
@@ -1312,6 +1346,62 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         startVoice();
         locked = true;
         styleHold();
+    }
+
+    private void enterReview() {
+        reviewing = minimal && !input.getText().toString().trim().isEmpty();
+        if (!reviewing) input.setText("");
+        styleBubble();
+    }
+
+    private void sendReview() {
+        String text = input.getText().toString();
+        reviewing = false;
+        input.setText("");
+        if (!text.trim().isEmpty()) sendText(text, true);
+        styleBubble();
+    }
+
+    private void cancelReview() {
+        reviewing = false;
+        input.setText("");
+        styleBubble();
+    }
+
+    /** Fix a misheard word with the keyboard, then send; closing the sheet keeps the words on the card. */
+    private void editReview() {
+        LinearLayout box = Ui.column(this);
+        TextView title = Ui.text(this, getString(R.string.bubble_edit_title), 20, t.text, Ui.SEMIBOLD);
+        title.setPadding(0, 0, 0, dp(12));
+        box.addView(title);
+        android.widget.EditText field = NewSessionSheet.field(this, t, input.getText().toString(), "");
+        field.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        field.setMinLines(2);
+        field.setMaxLines(8);
+        field.setGravity(Gravity.TOP | Gravity.START);
+        field.setPadding(dp(14), dp(12), dp(14), dp(12));
+        box.addView(field, new LinearLayout.LayoutParams(-1, -2));
+        Dialog d = Ui.bottomSheet(this, t, box);
+        boolean[] sent = {false};
+        TextView send = Ui.primaryButton(this, t, getString(R.string.bubble_send), v -> {
+            sent[0] = true;
+            input.setText(field.getText().toString());
+            d.dismiss();
+            sendReview();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(52));
+        lp.topMargin = dp(16);
+        box.addView(send, lp);
+        d.setOnDismissListener(x -> {
+            if (sent[0]) return;
+            input.setText(field.getText().toString());
+            enterReview();
+        });
+        d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+            | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        d.show();
+        field.requestFocus();
+        field.setSelection(field.getText().length());
     }
 
     private void cancelBubbleVoice() {
