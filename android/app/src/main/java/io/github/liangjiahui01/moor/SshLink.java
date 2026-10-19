@@ -186,7 +186,25 @@ final class SshLink implements TerminalSession.Transport {
 
     /** Blocking: runs one command and returns stdout. stdin may be null. */
     String exec(String command, byte[] stdin, int timeoutMs) throws Exception {
+        return new String(execBytes(command, stdin, timeoutMs), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    interface Progress {
+        void got(long bytes);
+    }
+
+    /** Like exec, with stdout as bytes (a file's content). */
+    byte[] execBytes(String command, byte[] stdin, int timeoutMs) throws Exception {
+        return execBytes(command, stdin, timeoutMs, 0, null);
+    }
+
+    /**
+     * window > 0 limits how much the machine sends ahead (bulk reads, see ChannelWindow); progress, if given,
+     * hears how much has arrived. timeoutMs then counts from the last data, so a slow but moving read goes on.
+     */
+    byte[] execBytes(String command, byte[] stdin, int timeoutMs, int window, Progress progress) throws Exception {
         ChannelExec ch = (ChannelExec) session.openChannel("exec");
+        if (window > 0) com.jcraft.jsch.ChannelWindow.limit(ch, window);
         ch.setCommand(command);
         ch.setEnv("LANG", "en_US.UTF-8");
         ByteArrayOutputStream err = new ByteArrayOutputStream();
@@ -200,11 +218,17 @@ final class SshLink implements TerminalSession.Transport {
             ByteArrayOutputStream got = new ByteArrayOutputStream();
             byte[] buf = new byte[16 * 1024];
             long until = System.currentTimeMillis() + timeoutMs;
+            long reported = 0;
             while (true) {
                 while (in.available() > 0) {
                     int n = in.read(buf);
                     if (n < 0) break;
                     got.write(buf, 0, n);
+                    if (progress != null) until = System.currentTimeMillis() + timeoutMs;
+                }
+                if (progress != null && got.size() - reported >= 16 * 1024) {
+                    reported = got.size();
+                    progress.got(reported);
                 }
                 if (ch.isClosed() && in.available() <= 0) break;
                 if (System.currentTimeMillis() > until) throw new IOException("command timed out");
@@ -214,7 +238,7 @@ final class SshLink implements TerminalSession.Transport {
                 throw new IOException(err.toString("UTF-8").trim().isEmpty()
                     ? "command failed (" + ch.getExitStatus() + ")" : err.toString("UTF-8").trim());
             }
-            return got.toString("UTF-8");
+            return got.toByteArray();
         } finally {
             ch.disconnect();
         }

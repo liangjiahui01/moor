@@ -303,4 +303,26 @@
     <string name="bubble_edit">修改</string>
     <string name="bubble_send">发送</string>
     <string name="bubble_edit_title">修改后发送</string>
+    <string name="k_changes">改动</string>
+    <string name="files_back">返回</string>
+    <string name="files_changes_title">未提交的改动</string>
+    <string name="files_no_changes">正在用的项目里没有未提交的改动（本会话和 AI 工具所在的项目）。</string>
+    <string name="files_more">还有 %d 个没列出</string>
+    <string name="files_loading">加载中…</string>
+    <string name="files_loading_bytes">加载中… %1$s / %2$s</string>
+    <string name="files_opening">正在打开 %s…</string>
+    <string name="files_not_found">机器上没找到 %s</string>
+    <string name="files_failed">打不开：%s</string>
+    <string name="files_binary">二进制文件（%s），不能预览</string>
+    <string name="files_too_large">图片太大（%s），不预览</string>
+    <string name="files_truncated">只显示前 512 KB</string>
+    <string name="files_empty_dir">空文件夹</string>
+    <string name="files_no_diff">没有差异</string>
+    <string name="files_wrap">换行</string>
+    <string name="files_source">源码</string>
+    <string name="files_rendered">预览</string>
+    <string name="files_full">全文</string>
+    <string name="files_insert">插入路径</string>
+    <string name="files_refresh">刷新</string>
+    <string name="files_line_copied">已复制这一行</string>
 </resources>

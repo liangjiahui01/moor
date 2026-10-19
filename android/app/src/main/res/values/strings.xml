@@ -319,4 +319,26 @@
     <string name="bubble_edit">Edit</string>
     <string name="bubble_send">Send</string>
     <string name="bubble_edit_title">Edit, then send</string>
+    <string name="k_changes">Changes</string>
+    <string name="files_back">Back</string>
+    <string name="files_changes_title">Uncommitted changes</string>
+    <string name="files_no_changes">No uncommitted changes in the projects open on the machine (this session\'s, and where coding agents run).</string>
+    <string name="files_more">%d more not listed</string>
+    <string name="files_loading">Loading…</string>
+    <string name="files_loading_bytes">Loading… %1$s of %2$s</string>
+    <string name="files_opening">Opening %s…</string>
+    <string name="files_not_found">Not found on the machine: %s</string>
+    <string name="files_failed">Could not open: %s</string>
+    <string name="files_binary">Binary file (%s), no preview</string>
+    <string name="files_too_large">Image too large to preview (%s)</string>
+    <string name="files_truncated">Showing the first 512 KB</string>
+    <string name="files_empty_dir">Empty folder</string>
+    <string name="files_no_diff">No differences</string>
+    <string name="files_wrap">Wrap</string>
+    <string name="files_source">Source</string>
+    <string name="files_rendered">Preview</string>
+    <string name="files_full">Whole file</string>
+    <string name="files_insert">Insert path</string>
+    <string name="files_refresh">Refresh</string>
+    <string name="files_line_copied">Line copied</string>
 </resources>

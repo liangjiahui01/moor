@@ -72,6 +72,11 @@ final class Sessions {
         return PY + " dirs" + (args.isEmpty() ? "" : " " + args);
     }
 
+    /** Read-only file preview: `moor file open|changes|diff|raw ...` (see server/moor). */
+    static String fileCommand(String args) {
+        return PY + " file " + args;
+    }
+
     static String listCommand() {
         return PY + " ls";
     }

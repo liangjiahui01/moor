@@ -7,6 +7,9 @@
     moor new NAME [--cmd CMD] [--cwd DIR] / ls / attach NAME / kill NAME / rename NAME NEW
         Terminal sessions that keep running after you disconnect. A small daemon
         (started on demand) owns them and keeps their screen and history for when you attach.
+    moor file open TEXT... / changes / diff ROOT PATH / raw PATH
+        Read-only file preview for the app: open a path seen on the screen, list
+        uncommitted changes in the projects being worked on, show one file's diff.
     moor hooks install|uninstall|status
         Add (or remove) Claude Code hooks that send "needs your input" and
         "finished" events to the phone.
@@ -2013,6 +2016,294 @@ def cmd_dirs(args):
     print(json.dumps({"dirs": [home_rel(p) for _, p in projects[:40]]}))
 
 
+# ---- file preview: open a path seen on the screen, and what changed in the projects being worked on ----
+
+TEXT_MAX = 512 << 10
+RAW_MAX = 20 << 20
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+def out_json(obj):
+    sys.stdout.buffer.write(json.dumps(obj, ensure_ascii=False).encode("utf-8", "replace"))
+    sys.stdout.flush()
+
+
+def session_ids():
+    """Session id -> name, asked of the daemon (only if it is running)."""
+    try:
+        c = daemon_conn(start=False)
+    except OSError:
+        return None
+    if not c:
+        return None
+    c.close()
+    names = {}
+
+    def name(sid):
+        if sid not in names:
+            try:
+                names[sid] = request_on(daemon_conn(start=False), {"op": "name", "id": sid}).get("name", "")
+            except (OSError, AttributeError):
+                names[sid] = ""
+        return names[sid]
+    return name
+
+
+AGENTS = {"claude", "codex", "aider", "gemini", "opencode", "omp", "cursor-agent"}
+
+
+def work_dirs(session):
+    """Working directories of this user's processes, best first: the session's own, then where a coding agent
+    runs, then the rest, newest process first. Programs run by a multiplexer inside the session (herdr, tmux)
+    are not its children, so every process counts. Each item: (dir, rank), lower rank is better."""
+    found = {}
+    if os.path.isdir("/proc/self"):
+        uid = os.getuid()
+        name = session_ids() if session else None
+        pids = sorted((int(d) for d in os.listdir("/proc") if d.isdigit()), reverse=True)
+        for pid in pids:
+            try:
+                if os.stat(f"/proc/{pid}").st_uid != uid:
+                    continue
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+            except OSError:
+                continue
+            if cwd == "/" or cwd.endswith(" (deleted)"):
+                continue
+            rank = 2
+            try:
+                if pathlib.Path(f"/proc/{pid}/comm").read_text().strip() in AGENTS:
+                    rank = 1
+            except OSError:
+                pass
+            if name:
+                try:
+                    with open(f"/proc/{pid}/environ", "rb") as f:
+                        m = re.search(rb"(?:^|\0)MOOR_SESSION_ID=([^\0]*)", f.read())
+                    if m and name(m.group(1).decode()) == session:
+                        rank = 0
+                except OSError:
+                    pass
+            if cwd not in found or rank < found[cwd]:
+                found[cwd] = rank
+    else:
+        try:
+            for i in request({"op": "list"}).get("items", []):
+                d = i.get("cwd", "")
+                if d:
+                    found[d] = min(found.get(d, 2), 0 if i.get("name") == session else 2)
+        except OSError:
+            pass
+    # dicts keep insertion order (newest process first): a stable sort keeps it within a rank
+    return sorted(found.items(), key=lambda x: x[1])
+
+
+def git_root(d):
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return None
+        d = up
+
+
+def search_dirs(session):
+    """Where a relative path may start: each working directory and its project root."""
+    out, seen = [], set()
+    for d, rank in work_dirs(session):
+        for p in (d, git_root(d)):
+            if p and p not in seen:
+                seen.add(p)
+                out.append((p, rank))
+    return out
+
+
+LINE_SUFFIX = re.compile(r"(?::(\d+)(?::\d+)?|#L(\d+)(?:-L?\d+)?)$")
+
+
+def resolve(cands, session):
+    """The first text that names an existing file or folder; a newer file wins between same-named ones."""
+    dirs = None
+    for raw in cands:
+        text, line = raw.strip(), 0
+        m = LINE_SUFFIX.search(text)
+        variants = [(text, 0)]
+        if m:
+            variants.insert(0, (text[:m.start()], int(m.group(1) or m.group(2))))
+        for t, ln in variants:
+            if not t:
+                continue
+            t = os.path.expanduser(t)
+            if os.path.isabs(t):
+                if os.path.exists(t):
+                    return os.path.normpath(t), ln
+                continue
+            if dirs is None:
+                dirs = search_dirs(session)
+            hits = []
+            for d, rank in dirs:
+                p = os.path.normpath(os.path.join(d, t))
+                if os.path.exists(p):
+                    try:
+                        hits.append((rank, -os.stat(p).st_mtime, p))
+                    except OSError:
+                        pass
+            if hits:
+                hits.sort()
+                return hits[0][2], ln
+    return None, 0
+
+
+def describe(p, line=0):
+    r = {"path": p, "show": home_rel(p), "line": line}
+    try:
+        st = os.stat(p)
+    except OSError as e:
+        r["error"] = e.strerror or str(e)
+        return r
+    r["size"] = st.st_size
+    if os.path.isdir(p):
+        r["kind"] = "dir"
+        entries = []
+        try:
+            with os.scandir(p) as it:
+                for e in it:
+                    if e.name == ".git":
+                        continue
+                    try:
+                        d = e.is_dir()
+                        s = 0 if d else e.stat().st_size
+                    except OSError:
+                        d, s = False, 0
+                    entries.append({"n": e.name, "d": d, "s": s})
+        except OSError as e:
+            r["error"] = e.strerror or str(e)
+            return r
+        entries.sort(key=lambda x: (x["n"].startswith("."), not x["d"], x["n"].lower()))
+        r["entries"] = entries[:1000]
+        return r
+    ext = os.path.splitext(p)[1].lower()
+    if ext in IMAGE_EXT:
+        r["kind"] = "image" if st.st_size <= RAW_MAX else "large"
+        return r
+    try:
+        with open(p, "rb") as f:
+            data = f.read(TEXT_MAX)
+    except OSError as e:
+        r["error"] = e.strerror or str(e)
+        return r
+    if b"\0" in data[:8192]:
+        r["kind"] = "binary"
+        return r
+    r["kind"] = "text"
+    r["text"] = data.decode("utf-8", "replace")
+    r["truncated"] = st.st_size > TEXT_MAX
+    return r
+
+
+def git(root, *args, timeout=8):
+    return subprocess.run(["git", "-C", root, *args], capture_output=True, timeout=timeout)
+
+
+def repo_changes(root):
+    st = git(root, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all")
+    if st.returncode != 0:
+        return None
+    files = {}
+    for e in st.stdout.split(b"\0"):
+        if len(e) > 3:
+            files[e[3:].decode("utf-8", "replace")] = e[:2].decode()
+    if not files:
+        return None
+    counts = {}
+    if git(root, "rev-parse", "--verify", "-q", "HEAD").returncode == 0:
+        ns = git(root, "diff", "HEAD", "--numstat", "-z", "--no-renames")
+        for e in ns.stdout.split(b"\0"):
+            f = e.split(b"\t", 2)
+            if len(f) == 3:
+                counts[f[2].decode("utf-8", "replace")] = (f[0].decode(), f[1].decode())
+    items, newest = [], 0
+    for path, xy in files.items():
+        full = os.path.join(root, path)
+        try:
+            mtime = os.stat(full).st_mtime
+        except OSError:
+            mtime = 0
+        newest = max(newest, mtime)
+        a, d = counts.get(path, ("", ""))
+        if xy == "??" and not a:
+            try:
+                if os.path.getsize(full) <= TEXT_MAX:
+                    with open(full, "rb") as fh:
+                        data = fh.read()
+                    a, d = ("-", "-") if b"\0" in data[:8192] else (str(data.count(b"\n") + (0 if data.endswith(b"\n") or not data else 1)), "0")
+            except OSError:
+                pass
+        items.append({"p": path, "x": xy, "a": a, "d": d, "t": mtime})
+    items.sort(key=lambda i: -i["t"])
+    br = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.decode().strip()
+    return {"root": root, "show": home_rel(root), "branch": "" if br == "HEAD" else br, "newest": newest,
+            "total": len(items), "files": items[:300]}
+
+
+def file_changes(session):
+    roots = {}
+    for d, rank in work_dirs(session):
+        r = git_root(d)
+        if r and (r not in roots or rank < roots[r]):
+            roots[r] = rank
+    repos = []
+    for r, rank in list(roots.items())[:15]:
+        try:
+            c = repo_changes(r)
+        except (OSError, subprocess.SubprocessError):
+            c = None
+        if c:
+            c["rank"] = rank
+            repos.append(c)
+    # The session's own projects, then those an agent works in; within each, the most recently changed first
+    repos.sort(key=lambda c: (c["rank"], -c["newest"]))
+    return {"repos": repos}
+
+
+def file_diff(root, path):
+    full = os.path.join(root, path)
+    tracked = git(root, "ls-files", "--error-unmatch", "--", path).returncode == 0
+    if not tracked:
+        r = git(root, "diff", "--no-index", "--no-color", "--", "/dev/null", path)
+        out = r.stdout
+    elif git(root, "rev-parse", "--verify", "-q", "HEAD").returncode == 0:
+        out = git(root, "diff", "HEAD", "--no-color", "--no-ext-diff", "--no-renames", "--", path).stdout
+    else:
+        out = git(root, "diff", "--cached", "--no-color", "--no-ext-diff", "--", path).stdout
+    out_json({"root": root, "path": path, "full": full, "show": home_rel(full),
+              "diff": out[:TEXT_MAX].decode("utf-8", "replace"), "truncated": len(out) > TEXT_MAX})
+
+
+def cmd_file(a):
+    if a[:1] == ["open"]:
+        ap = argparse.ArgumentParser(prog="moor file open")
+        ap.add_argument("--session", default="")
+        ap.add_argument("cands", nargs="+", help="texts that may name a file, best first")
+        n = ap.parse_args(a[1:])
+        p, line = resolve(n.cands, n.session)
+        out_json(describe(p, line) if p else {"error": "not found"})
+    elif a[:1] == ["changes"]:
+        ap = argparse.ArgumentParser(prog="moor file changes")
+        ap.add_argument("--session", default="")
+        out_json(file_changes(ap.parse_args(a[1:]).session))
+    elif a[:1] == ["diff"] and len(a) == 3:
+        file_diff(a[1], a[2])
+    elif a[:1] == ["raw"] and len(a) == 2:
+        with open(a[1], "rb") as f:
+            sys.stdout.buffer.write(f.read(RAW_MAX))
+    else:
+        print("usage: moor file open [--session S] TEXT... | changes [--session S] | diff ROOT PATH | raw PATH",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def main():
     a = sys.argv[1:]
     if a[:1] == ["claim"]:
@@ -2040,6 +2331,8 @@ def main():
         ap.add_argument("--search", help="directories under home whose name matches")
         ap.add_argument("--ls", help="subdirectories of this directory")
         cmd_dirs(ap.parse_args(a[1:]))
+    elif a[:1] == ["file"]:
+        cmd_file(a[1:])
     elif a[:1] == ["attach"] and len(a) == 2:
         cmd_attach(a[1])
     elif a[:1] == ["kill"] and len(a) == 2:

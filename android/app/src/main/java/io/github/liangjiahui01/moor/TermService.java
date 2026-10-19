@@ -99,6 +99,8 @@ public class TermService extends Service {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     /** Listings run apart from io: one stuck on a dead link (up to 8 s) must not hold up attaching or reconnecting. */
     private final ExecutorService listIo = Executors.newSingleThreadExecutor();
+    /** File preview reads (up to a 20 MB image) run apart from both. */
+    private final ExecutorService fileIo = Executors.newSingleThreadExecutor();
     private final ClientProxy clientProxy = new ClientProxy();
 
     TerminalSession term;
@@ -589,6 +591,55 @@ public class TermService extends Service {
         });
     }
 
+    /** `moor file <args>` on the machine (file preview), apart from attaching; the result is its JSON output. */
+    /** Window for file reads: small enough that a slow path never queues more than about a second of data. */
+    private static final int FILE_WINDOW = 64 * 1024;
+
+    void files(String args, Result<String> cb) {
+        final SshLink l = link;
+        if (l == null || !pythonOk || l.pathDown()) {
+            cb.done(null, l == null || l.pathDown() ? message : getString(R.string.err_no_python));
+            return;
+        }
+        fileIo.execute(() -> {
+            String out = null, err = null;
+            try {
+                long t0 = System.currentTimeMillis();
+                out = new String(l.execBytes(Sessions.fileCommand(args), null, 20_000, FILE_WINDOW, n -> { }),
+                    StandardCharsets.UTF_8);
+                Diag.i(TAG, "file " + args.split(" ", 2)[0] + ": " + (System.currentTimeMillis() - t0) + " ms, " + out.length() + " chars");
+            } catch (Exception e) {
+                err = e.getMessage();
+            }
+            final String o = out, m = err;
+            main.post(() -> cb.done(o, m));
+        });
+    }
+
+    /** A file's bytes (an image to preview). */
+    void fileBytes(String path, SshLink.Progress progress, Result<byte[]> cb) {
+        final SshLink l = link;
+        if (l == null || l.pathDown()) {
+            cb.done(null, l == null ? getString(R.string.err_not_connected) : message);
+            return;
+        }
+        fileIo.execute(() -> {
+            byte[] out = null;
+            String err = null;
+            try {
+                long t0 = System.currentTimeMillis();
+                out = l.execBytes(Sessions.fileCommand("raw " + Sessions.q(path)), null, 20_000, FILE_WINDOW,
+                    n -> main.post(() -> progress.got(n)));
+                Diag.i(TAG, "file raw: " + (System.currentTimeMillis() - t0) + " ms, " + out.length + " bytes");
+            } catch (Exception e) {
+                err = e.getMessage();
+            }
+            final byte[] o = out;
+            final String m = err;
+            main.post(() -> cb.done(o, m));
+        });
+    }
+
     void createSession(String name, String startup, String dir, Result<Void> cb) {
         run(Sessions.createCommand(name, startup, dir, term.getColumns(), term.getRows()), (out, err) -> {
             if (err == null) openSession(name);
@@ -831,6 +882,7 @@ public class TermService extends Service {
         term.finish();
         io.shutdown();
         listIo.shutdown();
+        fileIo.shutdown();
         super.onDestroy();
     }
 

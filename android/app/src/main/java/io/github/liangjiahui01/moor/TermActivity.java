@@ -592,6 +592,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
         LinearLayout actions = Ui.row(this);
         actions.setPadding(0, dp(8), 0, 0);
+        actions.addView(actionTile(R.drawable.ic_changes, R.string.k_changes, this::showChanges), tileLp());
         actions.addView(actionTile(R.drawable.ic_topbar, showTopBar ? R.string.k_hide_bar : R.string.k_show_bar,
             this::toggleTopBar), tileLp());
         actions.addView(actionTile(R.drawable.ic_minimal, R.string.k_minimal, this::toggleMinimal), tileLp());
@@ -1411,6 +1412,71 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         input.setText("");
     }
 
+    // ---- file preview: tap a path in the terminal; the changes of the projects being worked on ----
+
+    private FileViewer files;
+
+    private FileViewer files() {
+        if (files == null) files = new FileViewer(this, t, new FileViewer.Source() {
+            @Override
+            public void files(String args, TermService.Result<String> cb) {
+                if (service == null) cb.done(null, getString(R.string.err_not_connected));
+                else service.files(args, cb);
+            }
+
+            @Override
+            public void bytes(String path, SshLink.Progress progress, TermService.Result<byte[]> cb) {
+                if (service == null) cb.done(null, getString(R.string.err_not_connected));
+                else service.fileBytes(path, progress, cb);
+            }
+
+            @Override
+            public String session() {
+                return service == null ? null : service.currentSession();
+            }
+
+            @Override
+            public void insert(String path) {
+                if (service == null || service.term.getEmulator() == null) return;
+                service.term.getEmulator().paste(path.matches("[\\w./~+@:%-]+") ? path : "'" + path.replace("'", "'\\''") + "'");
+            }
+        });
+        return files;
+    }
+
+    private void showChanges() {
+        if (service == null || service.state() != TermService.State.CONNECTED) {
+            Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        files().showChanges();
+    }
+
+    /** A tap on a link opens the browser; on a file path, the preview. Other taps do what they did. */
+    private void tapLink(MotionEvent e) {
+        if (service == null || service.state() != TermService.State.CONNECTED || panel.shown()) return;
+        com.termux.terminal.TerminalEmulator em = service.term.getEmulator();
+        if (em == null) return;
+        int[] cr = view.getColumnAndRow(e, true);
+        PathTap.Hit h;
+        try {
+            h = PathTap.at(em.getScreen(), cr[0], cr[1], em.mColumns, em.mRows);
+        } catch (RuntimeException ex) {
+            Diag.w(TAG, "tap: " + ex);
+            return;
+        }
+        if (h == null) return;
+        if (h.url != null) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(h.url)));
+            } catch (Exception ex) {
+                Toast.makeText(this, getString(R.string.files_failed, ex.getMessage()), Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        files().openTapped(h);
+    }
+
     /** The bubble's menu: keyboard, image, sessions, a few keys, and the way back to the bars. */
     private void showBubbleMenu() {
         if (service == null) return;
@@ -1420,6 +1486,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         tiles.addView(actionTile(R.drawable.ic_image, R.string.k_image, () -> {
             d[0].dismiss();
             showImageSource();
+        }), tileLp());
+        tiles.addView(actionTile(R.drawable.ic_changes, R.string.k_changes, () -> {
+            d[0].dismiss();
+            showChanges();
         }), tileLp());
         tiles.addView(actionTile(R.drawable.ic_minimal, R.string.k_exit_minimal, () -> {
             d[0].dismiss();
@@ -1656,6 +1726,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             getSystemService(InputMethodManager.class).hideSoftInputFromWindow(view.getWindowToken(), 0);
         }
         view.requestFocus();
+        tapLink(e);
     }
 
     @Override public boolean shouldBackButtonBeMappedToEscape() { return false; }
