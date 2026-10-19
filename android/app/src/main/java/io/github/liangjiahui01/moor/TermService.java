@@ -570,6 +570,25 @@ public class TermService extends Service {
         });
     }
 
+    /** `moor dirs <args>` on the machine (folders for the new-session picker), apart from attaching. */
+    void dirs(String args, Result<String> cb) {
+        final SshLink l = link;
+        if (l == null || !pythonOk || l.pathDown()) {
+            cb.done(null, l == null || l.pathDown() ? message : getString(R.string.err_no_python));
+            return;
+        }
+        listIo.execute(() -> {
+            String out = null, err = null;
+            try {
+                out = l.exec(Sessions.dirsCommand(args), null, 8_000);
+            } catch (Exception e) {
+                err = e.getMessage();
+            }
+            final String o = out, m = err;
+            main.post(() -> cb.done(o, m));
+        });
+    }
+
     void createSession(String name, String startup, String dir, Result<Void> cb) {
         run(Sessions.createCommand(name, startup, dir, term.getColumns(), term.getRows()), (out, err) -> {
             if (err == null) openSession(name);

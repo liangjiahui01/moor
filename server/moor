@@ -1923,6 +1923,96 @@ def session_name_from_env():
 
 # ---------------------------------------------------------------- main
 
+# ---- directories for the new-session picker: git projects, search by name, and listing one folder ----
+
+SKIP_DIRS = {"node_modules", "__pycache__", "venv", "site-packages", "Library", "snap", "go", "miniconda3", "anaconda3"}
+
+
+def home_rel(p):
+    home = os.path.expanduser("~")
+    for h in dict.fromkeys([home, os.path.realpath(home)]):
+        if p == h:
+            return "~"
+        if p.startswith(h + "/"):
+            return "~" + p[len(h):]
+    return p
+
+
+def walk_dirs(root, depth, budget):
+    """Non-hidden directories under root, level by level, skipping heavy ones; stops when time runs out."""
+    out, level = [], [root]
+    for _ in range(depth):
+        nxt = []
+        for base in level:
+            if time.monotonic() > budget:
+                return out + nxt
+            try:
+                with os.scandir(base) as it:
+                    for e in it:
+                        if e.name.startswith(".") or e.name in SKIP_DIRS:
+                            continue
+                        try:
+                            if e.is_dir(follow_symlinks=False):
+                                nxt.append(e.path)
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        out.extend(nxt)
+        level = nxt
+    return out
+
+
+def cmd_dirs(args):
+    home = os.path.expanduser("~")
+    if args.ls is not None:
+        p = os.path.abspath(os.path.expanduser(args.ls or "~"))
+        try:
+            names = sorted((e.name for e in os.scandir(p) if not e.name.startswith(".") and e.is_dir()), key=str.lower)
+        except OSError as e:
+            print(json.dumps({"error": e.strerror or str(e)}))
+            return
+        print(json.dumps({"path": home_rel(p), "dirs": names}))
+        return
+    budget = time.monotonic() + 2.5
+    if args.search is not None:
+        q = args.search.strip().lower()
+        found = []
+        for p in walk_dirs(home, 5, budget):
+            n = os.path.basename(p).lower()
+            if n == q:
+                rank = 0
+            elif n.startswith(q):
+                rank = 1
+            elif q in n:
+                rank = 2
+            else:
+                it = iter(n)
+                if not q or not all(ch in it for ch in q):
+                    continue
+                rank = 3
+            git = os.path.exists(os.path.join(p, ".git"))
+            found.append((rank, not git, p.count("/"), p.lower(), p))
+        found.sort()
+        # Loose letter-order matches only when nothing contains the words
+        if found and found[0][0] < 3:
+            found = [f for f in found if f[0] < 3]
+        print(json.dumps({"dirs": [home_rel(f[4]) for f in found[:40]]}))
+        return
+    # Git projects within three levels of home, most recently changed first
+    projects = []
+    for p in walk_dirs(home, 3, budget):
+        g = os.path.join(p, ".git")
+        if os.path.exists(g):
+            try:
+                t = max(os.stat(os.path.join(g, f)).st_mtime for f in ("HEAD", "index") if os.path.exists(os.path.join(g, f)))
+            except (OSError, ValueError):
+                t = 0
+            projects.append((-t, p))
+    projects.sort()
+    print(json.dumps({"dirs": [home_rel(p) for _, p in projects[:40]]}))
+
+
 def main():
     a = sys.argv[1:]
     if a[:1] == ["claim"]:
@@ -1945,6 +2035,11 @@ def main():
         Daemon().run(resume=a[2] if a[1:2] == ["--resume"] and len(a) > 2 else None)
     elif a[:1] == ["ls"]:
         cmd_ls()
+    elif a[:1] == ["dirs"]:
+        ap = argparse.ArgumentParser(prog="moor dirs", description="Directories for picking where a session starts (JSON)")
+        ap.add_argument("--search", help="directories under home whose name matches")
+        ap.add_argument("--ls", help="subdirectories of this directory")
+        cmd_dirs(ap.parse_args(a[1:]))
     elif a[:1] == ["attach"] and len(a) == 2:
         cmd_attach(a[1])
     elif a[:1] == ["kill"] and len(a) == 2:

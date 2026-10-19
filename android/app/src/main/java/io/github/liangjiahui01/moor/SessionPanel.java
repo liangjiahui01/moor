@@ -458,7 +458,12 @@ final class SessionPanel extends FrameLayout {
                 if (!dirs.contains(i.path) && dirs.size() < 6) dirs.add(i.path);
             }
         }
-        new NewSessionSheet(getContext(), t, taken, dirs, (name, cmd, dir) -> {
+        DirPicker.Helper helper = (args, cb) -> {
+            TermService sv = host.service();
+            if (sv == null) cb.done(null, getContext().getString(R.string.err_not_connected));
+            else sv.dirs(args, cb);
+        };
+        new NewSessionSheet(getContext(), t, taken, dirs, helper, (name, cmd, dir) -> {
             TermService sv = host.service();
             if (sv == null) return;
             if (!dir.isEmpty()) Prefs.addRecentDir(getContext(), dir);

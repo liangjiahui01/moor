@@ -35,7 +35,10 @@ final class NewSessionSheet {
     private final View[] options = new View[4];
     private EditText custom;
 
-    NewSessionSheet(Context c, Theme t, List<String> taken, List<String> dirs, Done done) {
+    private final DirPicker.Helper helper;
+
+    NewSessionSheet(Context c, Theme t, List<String> taken, List<String> dirs, DirPicker.Helper helper, Done done) {
+        this.helper = helper;
         this.c = c;
         this.t = t;
         this.taken = taken;
@@ -103,7 +106,19 @@ final class NewSessionSheet {
         dir = field(c, t, dirs.isEmpty() ? "~" : dirs.get(0), "~");
         dir.setTypeface(Ui.mono(c));
         dir.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        box.addView(dir, new LinearLayout.LayoutParams(-1, dp(48)));
+        // Typing a path stays possible; the folder button picks one without typing
+        LinearLayout dirRow = Ui.row(c);
+        dirRow.addView(dir, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        android.widget.FrameLayout pickBtn = Ui.iconButton(c, t, R.drawable.ic_folder, t.text, c.getString(R.string.dir_title), v ->
+            new DirPicker(c, t, helper, dirs, dir.getText().toString().trim(), picked -> {
+                dir.setText(picked);
+                dir.setSelection(picked.length());
+            }).show());
+        pickBtn.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(14)), dp(14)));
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        plp.leftMargin = dp(8);
+        dirRow.addView(pickBtn, plp);
+        box.addView(dirRow, new LinearLayout.LayoutParams(-1, dp(48)));
         if (!dirs.isEmpty()) {
             HorizontalScrollView hs = new HorizontalScrollView(c);
             hs.setHorizontalScrollBarEnabled(false);

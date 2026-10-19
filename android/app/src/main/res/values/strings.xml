@@ -304,4 +304,15 @@
     <string name="quick_enter">Press Enter after sending</string>
     <string name="quick_save">Save</string>
     <string name="quick_delete">Delete</string>
+    <string name="dir_title">Pick a folder</string>
+    <string name="dir_search_hint">Search folders, e.g. moor</string>
+    <string name="dir_recent">Recent</string>
+    <string name="dir_projects">Projects</string>
+    <string name="dir_browse">Browse</string>
+    <string name="dir_loading">Loading…</string>
+    <string name="dir_searching">Searching…</string>
+    <string name="dir_none">Nothing found</string>
+    <string name="dir_no_projects">No git repositories within three levels of home</string>
+    <string name="dir_empty">No subfolders</string>
+    <string name="dir_pick_here">Use this folder: %1$s</string>
 </resources>

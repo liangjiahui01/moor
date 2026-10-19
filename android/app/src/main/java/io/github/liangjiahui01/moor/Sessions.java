@@ -68,6 +68,10 @@ final class Sessions {
     }
 
     /** One line per session: name, created, last output, clients, foreground program, cwd, last two non-empty lines (\037-separated). */
+    static String dirsCommand(String args) {
+        return PY + " dirs" + (args.isEmpty() ? "" : " " + args);
+    }
+
     static String listCommand() {
         return PY + " ls";
     }
