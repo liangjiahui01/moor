@@ -161,8 +161,9 @@ public class TermService extends Service {
         s.onState(state, message);
     }
 
-    void detachScreen() {
-        if (screen == null) return;
+    /** Only the screen that is attached detaches: when the activity is recreated, the old one may pause after the new one attached. */
+    void detachScreen(Screen s) {
+        if (screen == null || screen != s) return;
         screen = null;
         clientProxy.target = null;
         backgroundSince = SystemClock.elapsedRealtime();
