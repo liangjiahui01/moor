@@ -341,4 +341,7 @@
     <string name="files_insert">Insert path</string>
     <string name="files_refresh">Refresh</string>
     <string name="files_line_copied">Line copied</string>
+    <string name="k_refresh">Refresh</string>
+    <string name="k_files">Files</string>
+    <string name="files_browse_title">Browse files</string>
 </resources>

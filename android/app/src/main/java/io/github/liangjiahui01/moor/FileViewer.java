@@ -134,6 +134,49 @@ final class FileViewer {
         loadChanges(p);
     }
 
+    /**
+     * Browse the session's files: straight into its folder when it has one; a multiplexer session (herdr) sits in
+     * home, so it lists the projects coding agents work in instead, and home.
+     */
+    void showFiles() {
+        open();
+        Page p = new Page();
+        p.title = a.getString(R.string.files_browse_title);
+        p.sub = "";
+        p.body = note(a.getString(R.string.files_loading));
+        push(p);
+        src.files("roots --session " + Sessions.q(n(src.session())), (out, err) -> {
+            JSONObject o = parse(out);
+            JSONArray dirs = o == null ? null : o.optJSONArray("dirs");
+            if (err != null || dirs == null) {
+                fill(p, note(a.getString(R.string.files_failed, err != null ? err : "?")));
+                return;
+            }
+            String own = o.optString("open");
+            if (!own.isEmpty() && p == cur) {
+                // The session's own folder replaces the waiting page, so Back closes the viewer
+                cur = null;
+                openPath(own, 0);
+                return;
+            }
+            fill(p, list(dirs.length(), i -> {
+                JSONObject d = dirs.optJSONObject(i);
+                String show = d.optString("show");
+                LinearLayout r = Ui.row(a);
+                r.setPadding(dp(16), 0, dp(16), 0);
+                r.addView(Ui.icon(a, R.drawable.ic_folder, t.accent, 18));
+                TextView nm = Ui.oneLine(Ui.monoText(a, show, 13.5f, t.text), TextUtils.TruncateAt.START);
+                nm.setPadding(dp(12), 0, dp(8), 0);
+                r.addView(nm, Ui.weight(1));
+                r.addView(Ui.icon(a, R.drawable.ic_chevron_right, t.faint, 16));
+                r.setBackground(Ui.pressable(t, null, 0));
+                r.setOnClickListener(v -> openPath(d.optString("path"), 0));
+                r.setLayoutParams(new ListView.LayoutParams(-1, dp(52)));
+                return r;
+            }));
+        });
+    }
+
     // ---- the window and its pages ----
 
     private void open() {

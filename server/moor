@@ -7,7 +7,7 @@
     moor new NAME [--cmd CMD] [--cwd DIR] / ls / attach NAME / kill NAME / rename NAME NEW
         Terminal sessions that keep running after you disconnect. A small daemon
         (started on demand) owns them and keeps their screen and history for when you attach.
-    moor file open TEXT... / changes / diff ROOT PATH / raw PATH
+    moor file open TEXT... / roots / changes / diff ROOT PATH / raw PATH
         Read-only file preview for the app: open a path seen on the screen, list
         uncommitted changes in the projects being worked on, show one file's diff.
     moor hooks install|uninstall|status
@@ -2281,6 +2281,24 @@ def file_diff(root, path):
               "diff": out[:TEXT_MAX].decode("utf-8", "replace"), "truncated": len(out) > TEXT_MAX})
 
 
+def file_roots(session):
+    """Where browsing starts for this session: its own folder when it has one (a project, not home), else the
+    projects coding agents work in (a multiplexer session such as herdr sits in home), then home."""
+    home = os.path.realpath(os.path.expanduser("~"))
+    own, others, seen = [], [], set()
+    for d, rank in work_dirs(session):
+        if rank > 1:
+            continue
+        p = git_root(d) or d
+        if os.path.realpath(p) == home or p in seen:
+            continue
+        seen.add(p)
+        (own if rank == 0 else others).append(p)
+    dirs = own + others + [os.path.expanduser("~")]
+    out_json({"open": own[0] if own else "",
+              "dirs": [{"path": p, "show": home_rel(p), "own": p in own} for p in dirs[:12]]})
+
+
 def cmd_file(a):
     if a[:1] == ["open"]:
         ap = argparse.ArgumentParser(prog="moor file open")
@@ -2293,13 +2311,17 @@ def cmd_file(a):
         ap = argparse.ArgumentParser(prog="moor file changes")
         ap.add_argument("--session", default="")
         out_json(file_changes(ap.parse_args(a[1:]).session))
+    elif a[:1] == ["roots"]:
+        ap = argparse.ArgumentParser(prog="moor file roots")
+        ap.add_argument("--session", default="")
+        file_roots(ap.parse_args(a[1:]).session)
     elif a[:1] == ["diff"] and len(a) == 3:
         file_diff(a[1], a[2])
     elif a[:1] == ["raw"] and len(a) == 2:
         with open(a[1], "rb") as f:
             sys.stdout.buffer.write(f.read(RAW_MAX))
     else:
-        print("usage: moor file open [--session S] TEXT... | changes [--session S] | diff ROOT PATH | raw PATH",
+        print("usage: moor file open [--session S] TEXT... | roots [--session S] | changes [--session S] | diff ROOT PATH | raw PATH",
               file=sys.stderr)
         sys.exit(2)
 

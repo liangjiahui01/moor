@@ -330,7 +330,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     /** Label on the key → key pressed. */
     private static final String[][] STRIP = {
-        {"Paste", "PASTE"}, {"Esc", "ESC"}, {"Tab", "TAB"}, {"Enter", "⏎"}, {"Shift+Tab", "⇧TAB"},
+        {"Refresh", "REDRAW"}, {"Files", "FILES"}, {"Esc", "ESC"}, {"Tab", "TAB"}, {"Enter", "⏎"}, {"Shift+Tab", "⇧TAB"},
         {"↑", "↑"}, {"↓", "↓"}, {"←", "←"}, {"→", "→"}, {"Ctrl", "CTRL"}, {"Alt", "ALT"}, {"^C", "^C"},
         {"Home", "HOME"}, {"End", "END"}, {"PgUp", "PGUP"}, {"PgDn", "PGDN"},
     };
@@ -389,6 +389,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     /** A key with a name on it, as wide as its name. */
     private View pillKey(String label, String key) {
+        if (key.equals("REDRAW")) label = getString(R.string.k_refresh);
+        if (key.equals("FILES")) label = getString(R.string.k_files);
         FrameLayout cell = new FrameLayout(this);
         cell.setBackground(keyBg(false));
         TextView b = Ui.text(this, label, 12.5f, t.text, Ui.REGULAR);
@@ -753,6 +755,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             case "ALT": altOn = !altOn; refreshToggles(); return;
             case "⋯": setMore(morePanel.getVisibility() != View.VISIBLE); return;
             case "PASTE": onPasteTextFromClipboard(s); return;
+            case "REDRAW": service.redraw(); return;
+            case "FILES": showFiles(); return;
             case "⇧TAB": s.write(new byte[]{27, '[', 'Z'}, 0, 3); return;
         }
         if (k.length() == 2 && k.charAt(0) == '^' && k.charAt(1) >= 'A' && k.charAt(1) <= 'Z') {
@@ -1444,6 +1448,14 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         return files;
     }
 
+    private void showFiles() {
+        if (service == null || service.state() != TermService.State.CONNECTED) {
+            Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        files().showFiles();
+    }
+
     private void showChanges() {
         if (service == null || service.state() != TermService.State.CONNECTED) {
             Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
@@ -1479,6 +1491,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             d[0].dismiss();
             showImageSource();
         }), tileLp());
+        tiles.addView(actionTile(R.drawable.ic_folder, R.string.k_files, () -> {
+            d[0].dismiss();
+            showFiles();
+        }), tileLp());
         tiles.addView(actionTile(R.drawable.ic_changes, R.string.k_changes, () -> {
             d[0].dismiss();
             showChanges();
@@ -1494,7 +1510,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         box.addView(q.view(), qlp);
         // Keys stay in the sheet, so several can be pressed in a row
         String[][] keys = {{"Esc", "ESC"}, {"Tab", "TAB"}, {"⇧Tab", "⇧TAB"}, {"Enter", "⏎"},
-            {"↑", "↑"}, {"↓", "↓"}, {"^C", "^C"}, {"Paste", "PASTE"}};
+            {"↑", "↑"}, {"↓", "↓"}, {"^C", "^C"}, {getString(R.string.k_refresh), "REDRAW"}};
         LinearLayout row = Ui.row(this);
         row.setPadding(0, dp(10), 0, 0);
         for (String[] k : keys) {

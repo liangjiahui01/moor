@@ -325,4 +325,7 @@
     <string name="files_insert">插入路径</string>
     <string name="files_refresh">刷新</string>
     <string name="files_line_copied">已复制这一行</string>
+    <string name="k_refresh">刷新</string>
+    <string name="k_files">文件</string>
+    <string name="files_browse_title">浏览文件</string>
 </resources>
