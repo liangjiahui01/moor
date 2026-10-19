@@ -311,6 +311,12 @@ public class TermService extends Service {
     }
 
     /** Reconnects with the current settings; if the current machine changed, starts from its own state. */
+    /** The current direct connection's proxy (path and round-trip time), null when there is none. */
+    Rtc.Proxy directProxy() {
+        SshLink l = link;
+        return l == null ? null : l.proxy();
+    }
+
     void reconnectWithNewSettings() {
         String id = Prefs.currentId(this);
         if (!id.equals(machineId)) {

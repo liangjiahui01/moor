@@ -601,6 +601,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         actions.addView(actionTile(R.drawable.ic_topbar, showTopBar ? R.string.k_hide_bar : R.string.k_show_bar,
             this::toggleTopBar), tileLp());
         actions.addView(actionTile(R.drawable.ic_minimal, R.string.k_minimal, this::toggleMinimal), tileLp());
+        actions.addView(actionTile(R.drawable.ic_link, R.string.k_route, this::showRoute), tileLp());
         actions.addView(actionTile(R.drawable.ic_redraw, R.string.k_redraw, () -> service.redraw()), tileLp());
         actions.addView(actionTile(R.drawable.ic_refresh, R.string.k_reconnect, () -> service.reconnectWithNewSettings()), tileLp());
         actions.addView(actionTile(R.drawable.ic_settings, R.string.k_settings, this::openSettings), tileLp());
@@ -1024,6 +1025,50 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             bubble.setScaleY(1f);
         }
         refreshToggles();
+    }
+
+    private static final String[] ROUTES = {"auto", "lan", "wan"};
+    private static final int[] ROUTE_LABELS = {R.string.route_auto, R.string.route_lan, R.string.route_wan};
+    private static final int[] ROUTE_HINTS = {R.string.route_auto_hint, R.string.route_lan_hint, R.string.route_wan_hint};
+
+    /** Which path a direct connection takes: first that works, company/home network, or the internet. */
+    private void showRoute() {
+        LinearLayout box = Ui.column(this);
+        TextView title = Ui.text(this, getString(R.string.route_title), 20, t.text, Ui.SEMIBOLD);
+        title.setPadding(dp(4), 0, 0, dp(6));
+        box.addView(title);
+        TextView now = Ui.text(this, routeNow(), 13.5f, t.sub, Ui.REGULAR);
+        now.setPadding(dp(4), 0, 0, dp(10));
+        box.addView(now);
+        Dialog d = Ui.bottomSheet(this, t, box);
+        String cur = Rtc.route(this);
+        for (int i = 0; i < ROUTES.length; i++) {
+            String key = ROUTES[i];
+            boolean on = key.equals(cur);
+            LinearLayout item = Ui.column(this);
+            item.setPadding(dp(16), dp(10), dp(16), dp(10));
+            item.setBackground(Ui.pressable(t, null, dp(12)));
+            item.addView(Ui.text(this, (on ? "✓  " : "") + getString(ROUTE_LABELS[i]), 16, on ? t.accent : t.text, Ui.MEDIUM));
+            TextView hint = Ui.text(this, getString(ROUTE_HINTS[i]), 12.5f, t.faint, Ui.REGULAR);
+            hint.setPadding(0, dp(3), 0, 0);
+            item.addView(hint);
+            item.setOnClickListener(v -> {
+                d.dismiss();
+                if (on || service == null) return;
+                Prefs.put(this, "route", key);
+                Diag.i("TermActivity", "route set to " + key);
+                service.reconnectWithNewSettings();
+            });
+            box.addView(item, new LinearLayout.LayoutParams(-1, -2));
+        }
+        d.show();
+    }
+
+    private String routeNow() {
+        Rtc.Proxy p = service == null ? null : service.directProxy();
+        if (p == null || p.path.isEmpty()) return getString(R.string.route_now_none);
+        String path = getString("lan".equals(p.path) ? R.string.route_lan : R.string.route_wan);
+        return p.rttMs > 0 ? getString(R.string.route_now_rtt, path, p.rttMs) : getString(R.string.route_now, path);
     }
 
     private void showVoiceSetup() {

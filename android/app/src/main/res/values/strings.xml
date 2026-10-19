@@ -281,4 +281,15 @@
     <string name="hold_locked">Listening… tap send to finish</string>
     <string name="hold_locked_bubble">Listening: tap the bubble to send, tap here to cancel</string>
     <string name="hold_cancel">Release to cancel</string>
+    <string name="k_route">Route</string>
+    <string name="route_title">Route</string>
+    <string name="route_auto">Auto</string>
+    <string name="route_lan">Private network</string>
+    <string name="route_wan">Internet</string>
+    <string name="route_auto_hint">First path that works; private network usually wins</string>
+    <string name="route_lan_hint">Only company or home network, VPN</string>
+    <string name="route_wan_hint">Only peer to peer over the internet</string>
+    <string name="route_now">Now: %1$s</string>
+    <string name="route_now_rtt">Now: %1$s · %2$d ms</string>
+    <string name="route_now_none">Now: not direct</string>
 </resources>

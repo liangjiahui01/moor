@@ -265,4 +265,15 @@
     <string name="hold_locked">正在听，点发送结束</string>
     <string name="hold_locked_bubble">正在听：点圆圈发送，点这里取消</string>
     <string name="hold_cancel">松手取消</string>
+    <string name="k_route">线路</string>
+    <string name="route_title">线路</string>
+    <string name="route_auto">自动</string>
+    <string name="route_lan">内网</string>
+    <string name="route_wan">公网</string>
+    <string name="route_auto_hint">哪条先通走哪条，内网优先</string>
+    <string name="route_lan_hint">只走公司或家里的内网、VPN</string>
+    <string name="route_wan_hint">只走互联网点对点</string>
+    <string name="route_now">当前：%1$s</string>
+    <string name="route_now_rtt">当前：%1$s · %2$d ms</string>
+    <string name="route_now_none">当前：未直连</string>
 </resources>

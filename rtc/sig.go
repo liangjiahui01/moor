@@ -135,8 +135,14 @@ var dialer = websocket.Dialer{HandshakeTimeout: 8 * time.Second, NetDialContext:
 // Public STUN servers tell each side its address on the internet.
 var defaultSTUN = "stun:stun.l.google.com:19302,stun:stun.miwifi.com:3478,stun:stun.cloudflare.com:3478"
 
-func newAPI() *webrtc.API {
+func newAPI() *webrtc.API { return newAPIFor("auto") }
+
+// newAPIFor limits the local addresses ICE uses to those the route allows (see localOK).
+func newAPIFor(route string) *webrtc.API {
 	se := webrtc.SettingEngine{}
+	if route == "lan" || route == "wan" {
+		se.SetIPFilter(func(ip net.IP) bool { return localOK(route, ip) })
+	}
 	se.DetachDataChannels()
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	// Notice a dead path within seconds, so SSH reconnects instead of hanging

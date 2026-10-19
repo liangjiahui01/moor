@@ -28,6 +28,7 @@ func dialMain(args []string) {
 	fallback := fs.String("fallback", "", "HOST:PORT to use when no direct path is found")
 	stun := fs.String("stun", defaultSTUN, "STUN servers")
 	timeout := fs.Duration("timeout", 10*time.Second, "how long to try a direct path")
+	route := fs.String("route", "auto", "auto (first path that works), lan (private addresses only) or wan (public only)")
 	fs.Parse(args)
 	if *keyStr == "" {
 		*keyStr = os.Getenv("MOOR_RTC_KEY") // keeps the key off the command line
@@ -35,7 +36,7 @@ func dialMain(args []string) {
 	useBuiltinDNS()
 	androidNetwork()
 
-	err := direct(*signal, *roomID, *keyStr, *stun, *timeout)
+	err := direct(*signal, *roomID, *keyStr, *stun, *timeout, *route)
 	if err == nil {
 		os.Exit(0)
 	}
@@ -61,10 +62,24 @@ func dialMain(args []string) {
 
 var errEnded = errors.New("ended")
 
+// reportRTT reports the path's round-trip time now and then, for the app to show.
+func reportRTT(pc *webrtc.PeerConnection) {
+	for d := 2 * time.Second; ; d = 10 * time.Second {
+		time.Sleep(d)
+		sctp := pc.SCTP()
+		if sctp == nil {
+			return
+		}
+		if s, ok := sctp.Transport().ICETransport().GetSelectedCandidatePairStats(); ok && s.CurrentRoundTripTime > 0 {
+			logf("rtt %.0f ms", s.CurrentRoundTripTime*1000)
+		}
+	}
+}
+
 // direct asks the machine (through the relay) to offer a data channel, answers it and, once it
 // is open, carries stdin/stdout over it until either side ends (returns errEnded then). Any error
 // before the channel opens means: try the fallback.
-func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
+func direct(signal, roomID, keyStr, stun string, timeout time.Duration, route string) error {
 	if signal == "" || roomID == "" || keyStr == "" {
 		return errors.New("not configured")
 	}
@@ -104,7 +119,7 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		return errors.New("offer has a bad signature")
 	}
 
-	pc, err := newAPI().NewPeerConnection(iceConfig(stun))
+	pc, err := newAPIFor(route).NewPeerConnection(iceConfig(stun))
 	if err != nil {
 		return err
 	}
@@ -134,6 +149,9 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		if cand == nil {
 			return
 		}
+		if !wantAddr(route, cand.Address) {
+			return
+		}
 		logf("local %s %s %s:%d", cand.Typ, cand.Protocol, cand.Address, cand.Port)
 		line := cand.ToJSON().Candidate
 		cmu.Lock()
@@ -148,7 +166,10 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		dc.OnOpen(func() { opened <- dc })
 	})
-	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: o.SDP}); err != nil {
+	if route == "lan" || route == "wan" {
+		logf("route only %s", route)
+	}
+	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: keepCandidates(o.SDP, route)}); err != nil {
 		pc.Close()
 		return err
 	}
@@ -193,6 +214,7 @@ func direct(signal, roomID, keyStr, stun string, timeout time.Duration) error {
 		return err
 	}
 	logf("route direct %s", describePair(pc))
+	go reportRTT(pc)
 	// A dead path ends the process right away: closing the channel can hang on a dead path, and
 	// the app reconnects as soon as SSH sees our stdout close
 	go func() {

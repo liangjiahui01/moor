@@ -81,6 +81,11 @@ final class SshLink implements TerminalSession.Transport {
         return p == null ? "" : p.route;
     }
 
+    /** The direct connection's proxy, null for plain SSH. */
+    Rtc.Proxy proxy() {
+        return proxy;
+    }
+
     /** True when a direct connection's path is known to be dead (no need to probe). */
     boolean pathDown() {
         Rtc.Proxy p = proxy;
