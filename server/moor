@@ -1377,6 +1377,19 @@ class Daemon:
         if s and conn in s.clients:
             s.clients.remove(conn)
 
+    def size_to(self, s, cols, rows):
+        if (cols, rows) == (s.cols, s.rows):
+            return
+        s.resize(cols, rows)
+        self.winsize(s, cols, rows)
+        if s.term.buf is s.term.alt and s.clients:
+            # A full-screen program redraws itself at the new size. Clear first: a device showing the session
+            # wider than that would otherwise keep the old text beside the new picture.
+            clear = b"\x1b[H\x1b[2J"
+            for c in list(s.clients):
+                self.send(c, clear)
+            s.record(clear)
+
     def winsize(self, s, cols, rows):
         import struct
         import termios
@@ -1513,9 +1526,7 @@ class Daemon:
             conn["sess"] = s
             s.clients.append(conn)
             cols, rows = fit_size(req.get("cols"), req.get("rows"), s)
-            if (cols, rows) != (s.cols, s.rows):
-                s.resize(cols, rows)
-                self.winsize(s, cols, rows)
+            self.size_to(s, cols, rows)
             self.send(conn, s.snapshot())
         else:
             reply({"ok": False, "error": "unknown request"})
@@ -1555,9 +1566,7 @@ class Daemon:
                 try:
                     size = json.loads(payload)
                     cols, rows = fit_size(size.get("cols"), size.get("rows"), s)
-                    if (cols, rows) != (s.cols, s.rows):
-                        s.resize(cols, rows)
-                        self.winsize(s, cols, rows)
+                    self.size_to(s, cols, rows)
                 except (ValueError, KeyError, OSError):
                     pass
 
