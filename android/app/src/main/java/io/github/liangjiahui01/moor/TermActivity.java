@@ -365,8 +365,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         scroller.setFadingEdgeLength(dp(18));
         LinearLayout strip = Ui.row(this);
         strip.setPadding(dp(6), dp(5), dp(6), dp(2));
-        if (!showTopBar) strip.addView(iconKey(R.drawable.ic_sessions, R.string.a11y_sessions, "SESSIONS"), pillLp(dp(40)));
-        strip.addView(iconKey(R.drawable.ic_keyboard, R.string.a11y_keyboard, "⌨"), pillLp(dp(40)));
         strip.addView(pillKey("»", "⋯"), pillLp(dp(40)));
         for (String[] k : STRIP) strip.addView(pillKey(k[0], k[1]), pillLp(-2));
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
@@ -405,15 +403,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             moreKey = cell;
             cell.setContentDescription(getString(R.string.a11y_more_keys));
         }
-        bindKey(cell, null, key, null, false);
-        return cell;
-    }
-
-    private View iconKey(int icon, int a11y, String key) {
-        FrameLayout cell = new FrameLayout(this);
-        cell.setBackground(keyBg(false));
-        cell.addView(Ui.icon(this, icon, t.text, 17), new FrameLayout.LayoutParams(dp(17), dp(17), Gravity.CENTER));
-        cell.setContentDescription(getString(a11y));
         bindKey(cell, null, key, null, false);
         return cell;
     }
@@ -761,10 +750,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         switch (k) {
             case "CTRL": ctrlOn = !ctrlOn; refreshToggles(); return;
             case "ALT": altOn = !altOn; refreshToggles(); return;
-            case "⌨": toggleKeyboard(); return;
             case "⋯": setMore(morePanel.getVisibility() != View.VISIBLE); return;
             case "PASTE": onPasteTextFromClipboard(s); return;
-            case "SESSIONS": panel.show(null); return;
             case "⇧TAB": s.write(new byte[]{27, '[', 'Z'}, 0, 3); return;
         }
         if (k.length() == 2 && k.charAt(0) == '^' && k.charAt(1) >= 'A' && k.charAt(1) <= 'Z') {
@@ -836,21 +823,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         view.setTextSize(fontSize);
         Prefs.saveFontSize(this, fontSize);
         if (fontLabel != null) fontLabel.setText(String.valueOf(Math.round(fontSize / getResources().getDisplayMetrics().scaledDensity)));
-    }
-
-    private boolean keyboardShown() {
-        android.view.WindowInsets in = view.getRootWindowInsets();
-        return in != null && in.isVisible(android.view.WindowInsets.Type.ime());
-    }
-
-    private void toggleKeyboard() {
-        InputMethodManager imm = getSystemService(InputMethodManager.class);
-        if (keyboardShown()) {
-            imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
-        } else {
-            view.requestFocus();
-            imm.showSoftInput(view, 0);
-        }
     }
 
     // ---- voice input: speech to text without the keyboard ----
@@ -1325,17 +1297,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         LinearLayout box = Ui.column(this);
         Dialog[] d = new Dialog[1];
         LinearLayout tiles = Ui.row(this);
-        tiles.addView(actionTile(R.drawable.ic_keyboard, R.string.a11y_keyboard, () -> {
-            d[0].dismiss();
-            main.postDelayed(this::toggleKeyboard, 150);
-        }), tileLp());
         tiles.addView(actionTile(R.drawable.ic_image, R.string.k_image, () -> {
             d[0].dismiss();
             showImageSource();
-        }), tileLp());
-        tiles.addView(actionTile(R.drawable.ic_sessions, R.string.a11y_sessions, () -> {
-            d[0].dismiss();
-            pressKey("SESSIONS");
         }), tileLp());
         tiles.addView(actionTile(R.drawable.ic_minimal, R.string.k_exit_minimal, () -> {
             d[0].dismiss();

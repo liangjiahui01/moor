@@ -19,7 +19,6 @@
     <!-- accessibility -->
     <string name="a11y_back">Back</string>
     <string name="a11y_sessions">Sessions</string>
-    <string name="a11y_keyboard">Keyboard</string>
     <string name="a11y_more_keys">More keys</string>
     <string name="a11y_session_menu">Session menu</string>
 
