@@ -188,6 +188,9 @@ public class TermService extends Service {
         setState(State.WAITING, getString(R.string.state_idle_disconnected));
     };
 
+    /** How long a path that went quiet while the app was frozen gets to answer again before a full reconnect. */
+    private static final long PATH_RECOVER_MS = 2_000;
+
     /** Back in the foreground: reconnect if waiting; after 15s away, probe the connection first. */
     void onScreenResumed() {
         long away = backgroundSince == 0 ? 0 : SystemClock.elapsedRealtime() - backgroundSince;
@@ -202,8 +205,27 @@ public class TermService extends Service {
             attempt = 0;
             connect();
         } else if (state == State.CONNECTED && link != null && link.pathDown()) {
-            // The direct path died while we were away: reconnect now instead of probing
-            reconnectNow("path down after resume");
+            // The path stopped answering while we were away. Often the system only froze the app for a few
+            // seconds (ColorOS does on every app switch, foreground service or not): the machine still holds
+            // the path, which answers again within about a second of the thaw. Give it a moment before
+            // dropping everything; a path that is really gone costs that moment more.
+            final SshLink l = link;
+            if (screen != null) screen.onProbe(true);
+            new Thread(() -> {
+                long p0 = SystemClock.elapsedRealtime();
+                // Ask the machine instead of waiting for our side's ICE state: the machine sees the path
+                // answer again within a second of the thaw, our side only at its next keepalive (up to 2 s)
+                boolean ok = l.probe((int) PATH_RECOVER_MS);
+                Diag.i(TAG, "path " + (ok ? "recovered" : "still down") + " after " + (SystemClock.elapsedRealtime() - p0) + "ms");
+                main.post(() -> {
+                    if (l != link) return;
+                    if (ok) {
+                        if (screen != null) screen.onProbe(false);
+                    } else {
+                        reconnectNow("path down after resume");
+                    }
+                });
+            }, "PathWait").start();
         } else if (state == State.CONNECTED && away > 15_000) {
             final SshLink l = link;
             if (screen != null) screen.onProbe(true);
