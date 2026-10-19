@@ -29,7 +29,7 @@ final class Setup {
 
     /** App-wide settings carried over; voice keys only when asked for. */
     private static final String[] BOOLS = {"notify_attention", "notify_done", "notify_bell", "ime_compat", "top_bar"};
-    private static final String[] STRINGS = {"theme"};
+    private static final String[] STRINGS = {"theme", QuickCommands.PREF};
     static final String[] VOICE = {"voice_api_key", "voice_app_id", "voice_access_token", "voice_model"};
 
     static final class Invites {

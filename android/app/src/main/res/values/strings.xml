@@ -291,4 +291,17 @@
     <string name="route_now">Now: %1$s</string>
     <string name="route_now_rtt">Now: %1$s · %2$d ms</string>
     <string name="route_now_none">Now: not direct</string>
+    <string name="k_quick">Quick commands</string>
+    <string name="quick_add">+</string>
+    <string name="quick_add_first">+ Add a quick command</string>
+    <string name="quick_add_title">Add a quick command</string>
+    <string name="quick_edit_title">Edit quick command</string>
+    <string name="quick_text">What to send</string>
+    <string name="quick_text_hint">e.g. continue, or git status</string>
+    <string name="quick_text_empty">Enter something to send</string>
+    <string name="quick_label">Name (optional)</string>
+    <string name="quick_label_hint">Shows the first line if empty</string>
+    <string name="quick_enter">Press Enter after sending</string>
+    <string name="quick_save">Save</string>
+    <string name="quick_delete">Delete</string>
 </resources>

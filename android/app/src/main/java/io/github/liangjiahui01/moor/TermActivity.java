@@ -60,6 +60,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private TextView ctrlKey, altKey;
     private View moreKey;
     private LinearLayout keyArea, morePanel;
+    private QuickCommands quick;
     private TextView fontLabel;
     private boolean themeDark;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -556,6 +557,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         p.setBackground(bg);
         p.setPadding(dp(10), dp(12), dp(10), 0);
 
+        p.addView(sectionLabel(R.string.k_quick));
+        quick = new QuickCommands(this, t, this::sendText, () -> setMore(false));
+        p.addView(quick.view());
+
         p.addView(sectionLabel(R.string.k_symbols));
         for (String[] rowKeys : SYMBOLS) {
             LinearLayout row = Ui.row(this);
@@ -744,6 +749,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private void setMore(boolean open) {
         if (morePanel == null) return;
         morePanel.setVisibility(open ? View.VISIBLE : View.GONE);
+        // The list may have changed in the bubble's menu
+        if (open && quick != null) quick.render();
         if (open && fontLabel != null) fontLabel.setText(String.valueOf(Math.round(fontSize / getResources().getDisplayMetrics().scaledDensity)));
         refreshToggles();
     }
@@ -1335,6 +1342,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             toggleMinimal();
         }), tileLp());
         box.addView(tiles);
+        QuickCommands q = new QuickCommands(this, t, this::sendText, () -> d[0].dismiss());
+        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(-1, -2);
+        qlp.topMargin = dp(10);
+        box.addView(q.view(), qlp);
         // Keys stay in the sheet, so several can be pressed in a row
         String[][] keys = {{"Esc", "ESC"}, {"Tab", "TAB"}, {"⇧Tab", "⇧TAB"}, {"Enter", "⏎"},
             {"↑", "↑"}, {"↓", "↓"}, {"^C", "^C"}, {"Paste", "PASTE"}};

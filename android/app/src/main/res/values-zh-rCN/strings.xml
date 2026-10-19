@@ -275,4 +275,17 @@
     <string name="route_now">当前：%1$s</string>
     <string name="route_now_rtt">当前：%1$s · %2$d ms</string>
     <string name="route_now_none">当前：未直连</string>
+    <string name="k_quick">快捷命令</string>
+    <string name="quick_add">＋</string>
+    <string name="quick_add_first">＋ 添加常用命令</string>
+    <string name="quick_add_title">添加快捷命令</string>
+    <string name="quick_edit_title">编辑快捷命令</string>
+    <string name="quick_text">发送的内容</string>
+    <string name="quick_text_hint">例如 继续，或 git status</string>
+    <string name="quick_text_empty">内容不能为空</string>
+    <string name="quick_label">名称（选填）</string>
+    <string name="quick_label_hint">留空则显示内容的第一行</string>
+    <string name="quick_enter">发送后回车</string>
+    <string name="quick_save">保存</string>
+    <string name="quick_delete">删除</string>
 </resources>
