@@ -1153,7 +1153,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     // Left alone, the bubble fades so the text under it shows; a touch brings it back and still counts.
     private static final long BUBBLE_IDLE_MS = 3000;
-    private static final float BUBBLE_IDLE_ALPHA = 0.3f;
+    private static final float BUBBLE_IDLE_ALPHA = 0.55f;
     private android.animation.ObjectAnimator bubbleFade;
     private boolean bubbleWasOn;
     private final Runnable bubbleIdle = () -> {
@@ -1207,7 +1207,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             wakeBubble();
         }
         int fill = holdCancel && holding ? t.red : on ? t.accent : (t.key & 0x00ffffff) | 0xe6000000;
-        bubble.setBackground(on ? Ui.round(fill, dp(28)) : Ui.outline(fill, t.line, dp(1), dp(28)));
+        // A light ring, so the bubble stays findable on a black screen even when faded
+        bubble.setBackground(on ? Ui.round(fill, dp(28)) : Ui.outline(fill, t.sub, dp(2), dp(28)));
         View icon = bubble.getChildAt(0);
         if (icon instanceof android.widget.ImageView) {
             ((android.widget.ImageView) icon).setImageTintList(android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
