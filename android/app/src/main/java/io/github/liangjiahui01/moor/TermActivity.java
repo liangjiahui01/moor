@@ -1448,6 +1448,21 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         return files;
     }
 
+    private Chat chat;
+
+    @Override
+    public void openChat() {
+        if (service == null || service.state() != TermService.State.CONNECTED) {
+            Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (chat == null) chat = new Chat(this, t, new Chat.Host() {
+            @Override public TermService service() { return service; }
+            @Override public void openFile(String path) { files().openFile(path); }
+        });
+        chat.show();
+    }
+
     private void showFiles() {
         if (service == null || service.state() != TermService.State.CONNECTED) {
             Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();

@@ -184,6 +184,16 @@ final class SshLink implements TerminalSession.Transport {
 
     Channel currentChannel() { return channel; }
 
+    private int forwarded = -1, forwardedTo;
+
+    /** A local port on the phone that reaches 127.0.0.1:remotePort on the machine through this connection. */
+    synchronized int forwardLocal(int remotePort) throws Exception {
+        if (forwarded > 0 && forwardedTo == remotePort) return forwarded;
+        forwarded = session.setPortForwardingL("127.0.0.1", 0, "127.0.0.1", remotePort);
+        forwardedTo = remotePort;
+        return forwarded;
+    }
+
     /** Blocking: runs one command and returns stdout. stdin may be null. */
     String exec(String command, byte[] stdin, int timeoutMs) throws Exception {
         return new String(execBytes(command, stdin, timeoutMs), java.nio.charset.StandardCharsets.UTF_8);

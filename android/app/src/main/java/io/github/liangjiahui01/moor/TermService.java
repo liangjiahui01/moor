@@ -640,6 +640,29 @@ public class TermService extends Service {
         });
     }
 
+    /** Chat: a phone-side port tunnelled to the machine's Paseo daemon, and its credential: {port, token, home}. */
+    void paseo(Result<String[]> cb) {
+        final SshLink l = link;
+        if (l == null || !pythonOk || l.pathDown()) {
+            cb.done(null, l == null || l.pathDown() ? message : getString(R.string.err_no_python));
+            return;
+        }
+        fileIo.execute(() -> {
+            String[] out = null;
+            String err = null;
+            try {
+                org.json.JSONObject o = new org.json.JSONObject(l.exec(Sessions.paseoCommand(), null, 10_000));
+                if (o.has("error")) err = o.getString("error");
+                else out = new String[]{String.valueOf(l.forwardLocal(o.getInt("port"))), o.getString("token"), o.optString("home")};
+            } catch (Exception e) {
+                err = e.getMessage();
+            }
+            final String[] o = out;
+            final String m = err;
+            main.post(() -> cb.done(o, m));
+        });
+    }
+
     void createSession(String name, String startup, String dir, Result<Void> cb) {
         run(Sessions.createCommand(name, startup, dir, term.getColumns(), term.getRows()), (out, err) -> {
             if (err == null) openSession(name);

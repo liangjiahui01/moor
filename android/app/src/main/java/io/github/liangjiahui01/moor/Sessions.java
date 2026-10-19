@@ -77,6 +77,11 @@ final class Sessions {
         return PY + " file " + args;
     }
 
+    /** Port and local credential of the machine's Paseo daemon (chat), as JSON. */
+    static String paseoCommand() {
+        return PY + " paseo";
+    }
+
     static String listCommand() {
         return PY + " ls";
     }

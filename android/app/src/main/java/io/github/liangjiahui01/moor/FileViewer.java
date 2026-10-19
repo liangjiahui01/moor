@@ -122,6 +122,12 @@ final class FileViewer {
         });
     }
 
+    /** A file or folder by its full path (from the chat). */
+    void openFile(String path) {
+        open();
+        openPath(path, 0);
+    }
+
     /** Uncommitted changes in the projects open on the machine. */
     void showChanges() {
         open();

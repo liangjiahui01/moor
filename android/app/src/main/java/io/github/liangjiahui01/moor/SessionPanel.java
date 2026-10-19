@@ -28,6 +28,9 @@ import java.util.Set;
 final class SessionPanel extends FrameLayout {
 
     interface Host {
+        /** Chat mode: Claude conversations through Paseo on the machine. */
+        void openChat();
+
         TermService service();
 
         void openSettings();
@@ -87,6 +90,16 @@ final class SessionPanel extends FrameLayout {
         top.addView(chip, clp);
         connText.setMaxWidth(dp(230));
         top.addView(new View(c), new LinearLayout.LayoutParams(0, 1, 1f));
+        TextView chat = Ui.text(c, c.getString(R.string.chat_title), 13, t.text, Ui.MEDIUM);
+        chat.setCompoundDrawablesRelativeWithIntrinsicBounds(tinted(R.drawable.ic_chat), null, null, null);
+        chat.setCompoundDrawablePadding(dp(6));
+        chat.setGravity(Gravity.CENTER_VERTICAL);
+        chat.setPadding(dp(12), 0, dp(14), 0);
+        chat.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
+        chat.setOnClickListener(v -> host.openChat());
+        LinearLayout.LayoutParams chlp = Ui.lp(-2, dp(32));
+        chlp.rightMargin = dp(4);
+        top.addView(chat, chlp);
         top.addView(Ui.iconButton(c, t, R.drawable.ic_settings, t.sub, c.getString(R.string.k_settings), v -> host.openSettings()));
         head.addView(top);
         LinearLayout titleRow = Ui.row(c);
@@ -693,5 +706,16 @@ final class SessionPanel extends FrameLayout {
 
     private int dp(float v) {
         return Ui.dp(getContext(), v);
+    }
+
+    private android.graphics.drawable.Drawable tinted(int res) {
+        android.graphics.drawable.Drawable d = getContext().getDrawable(res).mutate();
+        d.setTint(t.accent);
+        d.setBounds(0, 0, dp(16), dp(16));
+        int s = dp(16);
+        return new android.graphics.drawable.InsetDrawable(d, 0) {
+            @Override public int getIntrinsicWidth() { return s; }
+            @Override public int getIntrinsicHeight() { return s; }
+        };
     }
 }

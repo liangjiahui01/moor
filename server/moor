@@ -7,6 +7,8 @@
     moor new NAME [--cmd CMD] [--cwd DIR] / ls / attach NAME / kill NAME / rename NAME NEW
         Terminal sessions that keep running after you disconnect. A small daemon
         (started on demand) owns them and keeps their screen and history for when you attach.
+    moor paseo
+        Where the local Paseo daemon listens and its local credential, for the app's chat (JSON).
     moor file open TEXT... / roots / changes / diff ROOT PATH / raw PATH
         Read-only file preview for the app: open a path seen on the screen, list
         uncommitted changes in the projects being worked on, show one file's diff.
@@ -2299,6 +2301,32 @@ def file_roots(session):
               "dirs": [{"path": p, "show": home_rel(p), "own": p in own} for p in dirs[:12]]})
 
 
+# ---- chat: the app talks to a Paseo daemon (github.com/getpaseo/paseo) on this machine, through an SSH tunnel ----
+
+def cmd_paseo():
+    """Where the local Paseo daemon listens and its local credential (rewritten at every daemon start)."""
+    base = pathlib.Path(os.environ.get("PASEO_HOME") or os.path.expanduser("~/.paseo"))
+    try:
+        token = (base / "local-credential").read_text().strip()
+    except OSError:
+        out_json({"error": "no_paseo"})
+        return
+    port = 6767
+    try:
+        listen = str(json.loads((base / "config.json").read_text()).get("daemon", {}).get("listen", ""))
+        if listen.rsplit(":", 1)[-1].isdigit():
+            port = int(listen.rsplit(":", 1)[-1])
+    except (OSError, ValueError, AttributeError):
+        pass
+    import socket
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+    except OSError:
+        out_json({"error": "not_running", "port": port})
+        return
+    out_json({"port": port, "token": token, "home": os.path.realpath(os.path.expanduser("~"))})
+
+
 def cmd_file(a):
     if a[:1] == ["open"]:
         ap = argparse.ArgumentParser(prog="moor file open")
@@ -2353,6 +2381,8 @@ def main():
         ap.add_argument("--search", help="directories under home whose name matches")
         ap.add_argument("--ls", help="subdirectories of this directory")
         cmd_dirs(ap.parse_args(a[1:]))
+    elif a[:1] == ["paseo"]:
+        cmd_paseo()
     elif a[:1] == ["file"]:
         cmd_file(a[1:])
     elif a[:1] == ["attach"] and len(a) == 2:
