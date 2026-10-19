@@ -48,7 +48,8 @@ final class SessionPanel extends FrameLayout {
     private final View connDot;
     private final LinearLayout list;
     private final View newButton;
-    private final TextView sortChip, herdrChip;
+    private final TextView sortChip, herdrSub;
+    private final LinearLayout herdrCard;
     private Sessions.Listing last;
     private long lastAt;
     private boolean loading;
@@ -74,6 +75,7 @@ final class SessionPanel extends FrameLayout {
 
         LinearLayout head = Ui.column(c);
         head.setPadding(dp(20), dp(20), dp(12), dp(6));
+        head.setClipToPadding(false); // the herdr card reaches into the padding to line up with the list
         LinearLayout top = Ui.row(c);
         LinearLayout chip = Ui.row(c);
         chip.setPadding(dp(10), 0, dp(12), 0);
@@ -100,23 +102,37 @@ final class SessionPanel extends FrameLayout {
         chat.setPadding(dp(12), 0, dp(14), 0);
         chat.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
         chat.setOnClickListener(v -> host.openChat());
-        // Shown once the machine reports herdr web ui installed
-        herdrChip = Ui.text(c, "herdr", 13, t.text, Ui.MEDIUM);
-        herdrChip.setCompoundDrawablesRelativeWithIntrinsicBounds(tinted(R.drawable.ic_grid), null, null, null);
-        herdrChip.setCompoundDrawablePadding(dp(6));
-        herdrChip.setGravity(Gravity.CENTER_VERTICAL);
-        herdrChip.setPadding(dp(12), 0, dp(14), 0);
-        herdrChip.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
-        herdrChip.setOnClickListener(v -> host.openHerdrWeb());
-        herdrChip.setVisibility(GONE);
-        LinearLayout.LayoutParams hlp = Ui.lp(-2, dp(32));
-        hlp.rightMargin = dp(8);
-        top.addView(herdrChip, hlp);
         LinearLayout.LayoutParams chlp = Ui.lp(-2, dp(32));
         chlp.rightMargin = dp(4);
         top.addView(chat, chlp);
         top.addView(Ui.iconButton(c, t, R.drawable.ic_settings, t.sub, c.getString(R.string.k_settings), v -> host.openSettings()));
         head.addView(top);
+
+        // herdr web ui, when the machine has it: the way into the agents, so it gets the first, biggest spot
+        herdrCard = Ui.row(c);
+        herdrCard.setGravity(Gravity.CENTER_VERTICAL);
+        herdrCard.setPadding(dp(14), dp(14), dp(12), dp(14));
+        herdrCard.setBackground(Ui.pressable(t, Ui.outline(t.accentSoft, t.accent, dp(1), dp(18)), dp(18)));
+        FrameLayout tile = new FrameLayout(c);
+        tile.setBackground(Ui.round(t.accent, dp(12)));
+        android.widget.ImageView ti = Ui.icon(c, R.drawable.ic_grid, t.onAccent, 22);
+        tile.addView(ti, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        herdrCard.addView(tile, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout htext = Ui.column(c);
+        htext.setPadding(dp(14), 0, dp(8), 0);
+        htext.addView(Ui.text(c, "herdr", 17, t.text, Ui.SEMIBOLD));
+        herdrSub = Ui.oneLine(Ui.text(c, c.getString(R.string.herdr_card_sub), 13, t.sub, Ui.REGULAR), TextUtils.TruncateAt.END);
+        herdrSub.setPadding(0, dp(2), 0, 0);
+        htext.addView(herdrSub);
+        herdrCard.addView(htext, Ui.weight(1));
+        herdrCard.addView(Ui.icon(c, R.drawable.ic_chevron_right, t.sub, 20));
+        herdrCard.setOnClickListener(v -> host.openHerdrWeb());
+        herdrCard.setVisibility(GONE);
+        LinearLayout.LayoutParams hcl = new LinearLayout.LayoutParams(-1, -2);
+        // The list's cards sit 16dp from both edges; the header is padded 20 / 12
+        hcl.setMargins(-dp(4), dp(16), dp(4), 0);
+        head.addView(herdrCard, hcl);
+
         LinearLayout titleRow = Ui.row(c);
         titleRow.setPadding(0, dp(14), dp(4), 0);
         TextView title = Ui.text(c, c.getString(R.string.sessions_title), 32, t.text, Ui.SEMIBOLD);
@@ -237,7 +253,7 @@ final class SessionPanel extends FrameLayout {
     private void render() {
         Context c = getContext();
         list.removeAllViews();
-        herdrChip.setVisibility(last != null && last.webPort > 0 ? VISIBLE : GONE);
+        renderHerdr();
         styleSortChip();
         TermService s = host.service();
         if (s == null || s.state() != TermService.State.CONNECTED) {
@@ -277,6 +293,28 @@ final class SessionPanel extends FrameLayout {
             section(c.getString(R.string.group_others), rest.size(), t.sub);
         }
         for (Sessions.Info i : rest) list.addView(card(i, now, i.name.equals(cur), s.attentionFor(i.name)));
+    }
+
+    private void renderHerdr() {
+        boolean on = last != null && last.webPort > 0;
+        herdrCard.setVisibility(on ? VISIBLE : GONE);
+        if (!on) return;
+        Context c = getContext();
+        String sub;
+        int color = t.sub;
+        if (last.agents < 0) {
+            sub = c.getString(R.string.herdr_card_sub);
+        } else if (last.blocked > 0) {
+            sub = last.working > 0 ? c.getString(R.string.herdr_card_blocked_working, last.blocked, last.working)
+                : c.getString(R.string.herdr_card_blocked, last.blocked);
+            color = t.amber;
+        } else if (last.working > 0) {
+            sub = c.getString(R.string.herdr_card_working, last.working);
+        } else {
+            sub = c.getString(R.string.herdr_card_idle, last.agents);
+        }
+        herdrSub.setText(sub);
+        herdrSub.setTextColor(color);
     }
 
     // ---- order and pins ----

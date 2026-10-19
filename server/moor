@@ -1850,7 +1850,8 @@ def cmd_ls():
     print(f"NOW\t{r.get('now', int(time.time()))}\t{home}\t{os.path.realpath(home)}")
     installed, port = herdr_web_config()
     if installed:
-        print(f"W\t{port}")
+        n = herdr_agent_counts()
+        print("\t".join(["W", str(port)] + ([str(x) for x in n] if n else [])))
     for i in r.get("items", []):
         clean = lambda v: str(v).replace("\t", " ").replace("\n", " ")
         preview = "\x1f".join(clean(l) for l in i.get("preview", []))
@@ -2373,6 +2374,19 @@ def herdr_web_config():
         except OSError:
             pass
     return installed, port
+
+
+def herdr_agent_counts():
+    """herdr's agents: (all, working, waiting for the user), or None when herdr does not answer."""
+    import shutil
+    herdr = shutil.which("herdr") or os.path.expanduser("~/.local/bin/herdr")
+    try:
+        r = subprocess.run([herdr, "agent", "list"], capture_output=True, text=True, timeout=2)
+        agents = json.loads(r.stdout)["result"]["agents"]
+    except Exception:
+        return None
+    status = [a.get("agent_status") for a in agents]
+    return len(agents), status.count("working"), status.count("blocked")
 
 
 def port_open(port, timeout=0.3):

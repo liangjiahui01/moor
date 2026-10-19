@@ -333,6 +333,13 @@
     <string name="herdr_not_running">herdr web ui 没能启动，herdr 在运行吗？</string>
     <string name="herdr_failed">打不开 herdr web ui：%s</string>
     <string name="herdr_retry">点这里重试</string>
+    <string name="herdr_card_sub">以对话方式查看 agent</string>
+    <string name="herdr_card_idle">%d 个 agent，都没在跑</string>
+    <string name="herdr_card_working">%d 个在跑</string>
+    <string name="herdr_card_blocked">%d 个等你处理</string>
+    <string name="herdr_card_blocked_working">%1$d 个等你处理 · %2$d 个在跑</string>
+    <string name="web_voice_hint">按住说话，文字填进网页的输入框；上滑取消</string>
+    <string name="web_voice_no_box">没找到输入框，先点一下要输入的框</string>
     <string name="chat_title">对话</string>
     <string name="chat_new">新对话</string>
     <string name="chat_loading">加载中…</string>

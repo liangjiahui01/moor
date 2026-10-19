@@ -100,6 +100,8 @@ final class Sessions {
         long now;
         /** herdr web ui is installed on the machine (its port), else 0 */
         int webPort;
+        /** herdr's agents: all, working, waiting for the user; -1 when the machine did not say */
+        int agents = -1, working = -1, blocked = -1;
         final List<Info> items = new ArrayList<>();
     }
 
@@ -114,6 +116,11 @@ final class Sessions {
                 realHome = f.length > 3 ? f[3] : "";
             } else if (f[0].equals("W") && f.length >= 2) {
                 l.webPort = (int) parseLong(f[1]);
+                if (f.length >= 5) {
+                    l.agents = (int) parseLong(f[2]);
+                    l.working = (int) parseLong(f[3]);
+                    l.blocked = (int) parseLong(f[4]);
+                }
             } else if (f[0].equals("S") && f.length >= 8) {
                 Info i = new Info();
                 i.name = f[1];

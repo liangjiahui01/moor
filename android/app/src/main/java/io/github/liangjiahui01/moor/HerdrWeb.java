@@ -9,7 +9,9 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -26,6 +28,7 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 /**
  * herdr web ui (github.com/devswha/herdr-web-ui, MIT), a herdr plugin on the machine, shown in a web view.
@@ -33,6 +36,8 @@ import android.widget.TextView;
  * to a pane's live terminal. It listens on the machine's loopback only; the page reaches it through this app's
  * SSH connection (a local port forward), which the plugin lets in without pairing, like any SSH tunnel.
  * The window is hidden, not closed, on the way out, so the page keeps its state between visits.
+ * A mic button over the page dictates with the app's own speech recognition (the page's needs an OpenAI key,
+ * or a browser's, which a web view lacks) and types the text into the page's text box, unsent.
  */
 final class HerdrWeb {
     interface Host {
@@ -52,6 +57,11 @@ final class HerdrWeb {
     private Dialog dialog;
     private WebView web;
     private TextView banner;
+    private View mic;
+    private TextView bubble;
+    private VoiceInput voice;
+    private boolean holdCancel;
+    private float holdY;
     private int loadedPort = -1;
     private boolean failed;
 
@@ -63,6 +73,7 @@ final class HerdrWeb {
 
     void show() {
         if (dialog == null) build();
+        mic.setVisibility(VoiceInput.Config.load(a).usable() ? View.VISIBLE : View.GONE);
         dialog.show();
         connect();
     }
@@ -179,6 +190,8 @@ final class HerdrWeb {
         root.addView(banner, blp);
         banner.setVisibility(View.GONE);
 
+        buildMic(root);
+
         dialog.setContentView(root);
         Window w = dialog.getWindow();
         w.setBackgroundDrawable(new ColorDrawable(t.bg));
@@ -194,10 +207,165 @@ final class HerdrWeb {
         dialog.setOnKeyListener((d, code, e) -> {
             if (code != KeyEvent.KEYCODE_BACK) return false;
             if (e.getAction() == KeyEvent.ACTION_UP && !e.isCanceled()) {
-                if (web.canGoBack()) web.goBack();
+                if (voice != null) cancelVoice();
+                else if (web.canGoBack()) web.goBack();
                 else dialog.hide();
             }
             return true;
+        });
+    }
+
+    // ---- dictation ----
+
+    private void buildMic(FrameLayout root) {
+        FrameLayout m = new FrameLayout(a);
+        m.setBackground(Ui.round(t.accent, dp(26)));
+        m.setElevation(dp(4));
+        m.addView(Ui.icon(a, R.drawable.ic_mic, t.onAccent, 24), new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        m.setContentDescription(a.getString(R.string.web_voice_hint));
+        // Not focusable: the page's text box keeps the focus (and the keyboard stays as it was)
+        m.setFocusable(false);
+        m.setOnTouchListener(this::onMicTouch);
+        // Clear of the page's send button and composer, on the side of the thumb
+        FrameLayout.LayoutParams mlp = new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.BOTTOM | Gravity.END);
+        mlp.rightMargin = dp(16);
+        mlp.bottomMargin = dp(132);
+        root.addView(m, mlp);
+        mic = m;
+
+        bubble = Ui.text(a, "", 15, t.text, Ui.REGULAR);
+        bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
+        bubble.setBackground(Ui.outline(t.surface, t.accent, dp(1.5f), dp(16)));
+        bubble.setElevation(dp(4));
+        bubble.setMaxLines(6);
+        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        blp.leftMargin = blp.rightMargin = dp(16);
+        blp.bottomMargin = dp(196);
+        root.addView(bubble, blp);
+        bubble.setVisibility(View.GONE);
+    }
+
+    private boolean onMicTouch(View v, MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (a.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    host.needMic(() -> { });
+                    return false;
+                }
+                holdY = e.getRawY();
+                holdCancel = false;
+                v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                startVoice();
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                boolean c = holdY - e.getRawY() > dp(60);
+                if (c != holdCancel) {
+                    holdCancel = c;
+                    styleBubble(null);
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                if (voice == null) return true;
+                if (holdCancel) {
+                    cancelVoice();
+                } else {
+                    styleBubble(a.getString(R.string.voice_finishing));
+                    voice.stop();
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                cancelVoice();
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    private String heard = "";
+
+    private void startVoice() {
+        heard = "";
+        voice = new VoiceInput(a, new VoiceInput.Listener() {
+            @Override
+            public void onText(String text) {
+                heard = text;
+                styleBubble(null);
+            }
+
+            @Override
+            public void onLevel(float level) {
+                float s = 1f + level * 0.25f;
+                mic.animate().scaleX(s).scaleY(s).setDuration(90).start();
+            }
+
+            @Override
+            public void onDone(String text) {
+                endVoice();
+                if (text != null && !text.trim().isEmpty()) type(text.trim());
+            }
+
+            @Override
+            public void onError(String message) {
+                endVoice();
+                Toast.makeText(a, a.getString(R.string.voice_failed, message), Toast.LENGTH_LONG).show();
+            }
+        });
+        styleBubble(a.getString(R.string.voice_listening));
+        voice.start();
+    }
+
+    /** Stops dictation and drops what was heard. */
+    void cancelVoice() {
+        if (voice == null) return;
+        voice.cancel();
+        endVoice();
+    }
+
+    private void endVoice() {
+        voice = null;
+        heard = "";
+        bubble.setVisibility(View.GONE);
+        mic.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
+    }
+
+    /** Shows what was heard so far, or a status when nothing was yet. */
+    private void styleBubble(String status) {
+        if (voice == null) return;
+        bubble.setVisibility(View.VISIBLE);
+        bubble.setBackground(Ui.outline(t.surface, holdCancel ? t.red : t.accent, dp(1.5f), dp(16)));
+        if (holdCancel) {
+            bubble.setText(a.getString(R.string.hold_cancel));
+            bubble.setTextColor(t.red);
+        } else if (!heard.isEmpty()) {
+            bubble.setText(heard);
+            bubble.setTextColor(t.text);
+        } else {
+            bubble.setText(status != null ? status : a.getString(R.string.voice_listening));
+            bubble.setTextColor(t.sub);
+        }
+    }
+
+    /**
+     * Types text at the caret of the page's focused text box, or else into its last visible one (the composer),
+     * the way a keyboard would: the page's own handlers see an ordinary input event. A terminal's hidden input
+     * only when the user put the focus there: typing into it goes straight to the program.
+     */
+    private void type(String text) {
+        String js = "(function(t){"
+            + "function ok(x){return x&&!x.disabled&&!x.readOnly&&(x.tagName==='TEXTAREA'"
+            + "||(x.tagName==='INPUT'&&/^(text|search|)$/i.test(x.type||''))||x.isContentEditable);}"
+            + "var e=document.activeElement;"
+            + "if(!ok(e)){var c=[].slice.call(document.querySelectorAll('textarea,[contenteditable=true]'))"
+            + ".filter(function(x){var r=x.getBoundingClientRect();"
+            + "return ok(x)&&!x.classList.contains('xterm-helper-textarea')&&r.width>0&&r.height>0;});e=c[c.length-1];}"
+            + "if(!e)return 'none';e.focus();"
+            + "if(!document.execCommand('insertText',false,t)){"
+            + "var s=e.selectionStart==null?e.value.length:e.selectionStart,f=e.selectionEnd==null?s:e.selectionEnd;"
+            + "Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e),'value').set.call(e,e.value.slice(0,s)+t+e.value.slice(f));"
+            + "e.dispatchEvent(new Event('input',{bubbles:true}));}"
+            + "return 'ok';})(" + org.json.JSONObject.quote(text) + ")";
+        web.evaluateJavascript(js, r -> {
+            if (!"\"ok\"".equals(r)) Toast.makeText(a, R.string.web_voice_no_box, Toast.LENGTH_LONG).show();
         });
     }
 
