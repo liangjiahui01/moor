@@ -78,6 +78,10 @@ final class Sessions {
     }
 
     /** Port and local credential of the machine's Paseo daemon (chat), as JSON. */
+    static String herdrWebCommand() {
+        return PY + " herdrweb";
+    }
+
     static String paseoCommand() {
         return PY + " paseo";
     }
@@ -94,6 +98,8 @@ final class Sessions {
 
     static final class Listing {
         long now;
+        /** herdr web ui is installed on the machine (its port), else 0 */
+        int webPort;
         final List<Info> items = new ArrayList<>();
     }
 
@@ -106,6 +112,8 @@ final class Sessions {
                 l.now = parseLong(f[1]);
                 home = f[2];
                 realHome = f.length > 3 ? f[3] : "";
+            } else if (f[0].equals("W") && f.length >= 2) {
+                l.webPort = (int) parseLong(f[1]);
             } else if (f[0].equals("S") && f.length >= 8) {
                 Info i = new Info();
                 i.name = f[1];

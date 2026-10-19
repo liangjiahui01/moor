@@ -31,6 +31,9 @@ final class SessionPanel extends FrameLayout {
         /** Chat mode: Claude conversations through Paseo on the machine. */
         void openChat();
 
+        /** herdr web ui (a herdr plugin) on the machine, in a web view. */
+        void openHerdrWeb();
+
         TermService service();
 
         void openSettings();
@@ -45,7 +48,7 @@ final class SessionPanel extends FrameLayout {
     private final View connDot;
     private final LinearLayout list;
     private final View newButton;
-    private final TextView sortChip;
+    private final TextView sortChip, herdrChip;
     private Sessions.Listing last;
     private long lastAt;
     private boolean loading;
@@ -97,6 +100,18 @@ final class SessionPanel extends FrameLayout {
         chat.setPadding(dp(12), 0, dp(14), 0);
         chat.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
         chat.setOnClickListener(v -> host.openChat());
+        // Shown once the machine reports herdr web ui installed
+        herdrChip = Ui.text(c, "herdr", 13, t.text, Ui.MEDIUM);
+        herdrChip.setCompoundDrawablesRelativeWithIntrinsicBounds(tinted(R.drawable.ic_grid), null, null, null);
+        herdrChip.setCompoundDrawablePadding(dp(6));
+        herdrChip.setGravity(Gravity.CENTER_VERTICAL);
+        herdrChip.setPadding(dp(12), 0, dp(14), 0);
+        herdrChip.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(16)), dp(16)));
+        herdrChip.setOnClickListener(v -> host.openHerdrWeb());
+        herdrChip.setVisibility(GONE);
+        LinearLayout.LayoutParams hlp = Ui.lp(-2, dp(32));
+        hlp.rightMargin = dp(8);
+        top.addView(herdrChip, hlp);
         LinearLayout.LayoutParams chlp = Ui.lp(-2, dp(32));
         chlp.rightMargin = dp(4);
         top.addView(chat, chlp);
@@ -222,6 +237,7 @@ final class SessionPanel extends FrameLayout {
     private void render() {
         Context c = getContext();
         list.removeAllViews();
+        herdrChip.setVisibility(last != null && last.webPort > 0 ? VISIBLE : GONE);
         styleSortChip();
         TermService s = host.service();
         if (s == null || s.state() != TermService.State.CONNECTED) {

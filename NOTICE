@@ -29,3 +29,5 @@ It includes or bundles the following third-party work:
 
 The chat screen is a client of Paseo (https://github.com/getpaseo/paseo, Apache License 2.0):
 it speaks Paseo's WebSocket protocol to the daemon on the host. No Paseo code is bundled.
+The herdr button opens herdr web ui (https://github.com/devswha/herdr-web-ui, MIT License), a herdr plugin
+installed on the host, in a web view. No herdr web ui code is bundled.

@@ -9,6 +9,8 @@
         (started on demand) owns them and keeps their screen and history for when you attach.
     moor paseo
         Where the local Paseo daemon listens and its local credential, for the app's chat (JSON).
+    moor herdrweb
+        Where herdr web ui listens, starting it when it is installed but not running (JSON).
     moor file open TEXT... / roots / changes / diff ROOT PATH / raw PATH
         Read-only file preview for the app: open a path seen on the screen, list
         uncommitted changes in the projects being worked on, show one file's diff.
@@ -1846,6 +1848,9 @@ def cmd_ls():
     r = request({"op": "list"})
     home = str(HOME)
     print(f"NOW\t{r.get('now', int(time.time()))}\t{home}\t{os.path.realpath(home)}")
+    installed, port = herdr_web_config()
+    if installed:
+        print(f"W\t{port}")
     for i in r.get("items", []):
         clean = lambda v: str(v).replace("\t", " ").replace("\n", " ")
         preview = "\x1f".join(clean(l) for l in i.get("preview", []))
@@ -2351,6 +2356,58 @@ def cmd_paseo():
     out_json({"port": port, "token": token, "home": os.path.realpath(os.path.expanduser("~"))})
 
 
+HERDR_WEB = "devswha.herdr-web-ui"
+
+
+def herdr_web_config():
+    """herdr web ui (github.com/devswha/herdr-web-ui), the herdr plugin: (installed, port)."""
+    base = pathlib.Path(os.environ.get("HERDR_CONFIG_DIR") or os.path.expanduser("~/.config/herdr")) / "plugins"
+    installed = (base / "config" / HERDR_WEB).is_dir()  # herdr makes it when it installs the plugin
+    port = 7317
+    for name in ("env", ".env"):  # read in the plugin's order: .env wins
+        try:
+            for line in (base / "config" / HERDR_WEB / name).read_text().splitlines():
+                k, _, v = line.strip().partition("=")
+                if k.strip() == "PORT" and v.strip().strip("'\"").isdigit():
+                    port = int(v.strip().strip("'\""))
+        except OSError:
+            pass
+    return installed, port
+
+
+def port_open(port, timeout=0.3):
+    import socket
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def cmd_herdrweb():
+    """Where herdr web ui listens; starts it through herdr when it is installed but not running."""
+    installed, port = herdr_web_config()
+    if port_open(port):
+        out_json({"port": port})
+        return
+    if not installed:
+        out_json({"error": "not_installed"})
+        return
+    import shutil
+    herdr = shutil.which("herdr") or os.path.expanduser("~/.local/bin/herdr")
+    try:
+        subprocess.run([herdr, "plugin", "action", "invoke", "start", "--plugin", HERDR_WEB],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for _ in range(40):
+        if port_open(port):
+            out_json({"port": port})
+            return
+        time.sleep(0.5)
+    out_json({"error": "not_running", "port": port})
+
+
 def cmd_file(a):
     if a[:1] == ["open"]:
         ap = argparse.ArgumentParser(prog="moor file open")
@@ -2407,6 +2464,8 @@ def main():
         cmd_dirs(ap.parse_args(a[1:]))
     elif a[:1] == ["paseo"]:
         cmd_paseo()
+    elif a[:1] == ["herdrweb"]:
+        cmd_herdrweb()
     elif a[:1] == ["file"]:
         cmd_file(a[1:])
     elif a[:1] == ["attach"] and len(a) == 2:

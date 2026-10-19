@@ -26,6 +26,7 @@ Moor 通过 SSH 连到你的机器，每个会话都在那台机器上持续运�
 | 图片 | 把照片或截图发进会话（相册、拍照，或从别的 App 分享）。图片传到主机，路径填进输入，Claude Code 会当作图片读取。 |
 | 文件预览 | 点终端里的路径，或按「文件」键进本会话的项目，就能看文件：带行号的代码、渲染好的 Markdown、图片、文件夹。「改动」列出正在用的项目（本会话和 AI 工具所在的项目）里未提交的文件，点开看 diff。只读。 |
 | 对话模式 | 问个问题、做个临时任务时，用对话界面跟 Claude Code 说话，不走终端：回复按文字流式出现、渲染 Markdown，跑的命令和改的文件折成一行可点开，Claude 的提问和权限请求变成按钮，干活时能停下或接着补话。在会话列表顶上的「对话」里新建，可选任意目录。需要主机上运行 [Paseo](https://github.com/getpaseo/paseo)；对话存在 Paseo 里，它自己的 App 里也看得到。 |
+| herdr | 主机上用 [herdr](https://github.com/herdrdev/herdr) 并装了 [herdr web ui](https://github.com/devswha/herdr-web-ui) 插件时，会话列表顶上多一个 herdr 按钮，经 App 自己的连接打开它：herdr 里正在跑的那些 AI 会话以聊天形式显示，提问变成卡片，也能看每个窗格的实时终端。插件只监听主机本机，不用另开端口。 |
 | 为手机设计的输入 | 底部两行：一行左右滑动的按键（刷新、文件、Esc、Tab、Enter、Shift+Tab、方向键、Ctrl、Alt……），一行输入框，用平常的键盘打字或语音输入一整句，再发送。面板里有符号和 Ctrl 组合；键盘键直接往终端里打字。顶栏默认隐藏（可在面板里打开），第一个键打开会话列表。 |
 | 浅色和深色 | 跟随系统，或手动选。 |
 | Ghostty 外观 | Catppuccin Mocha / Latte 配色、JetBrains Mono 字体（带符号与 Nerd Font 图标）、竖线光标；中文在两格里居中。 |

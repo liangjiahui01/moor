@@ -328,6 +328,11 @@
     <string name="k_refresh">刷新</string>
     <string name="k_files">文件</string>
     <string name="files_browse_title">浏览文件</string>
+    <string name="herdr_starting">正在打开 herdr web ui…</string>
+    <string name="herdr_not_installed">这台机器上没装 herdr web ui。</string>
+    <string name="herdr_not_running">herdr web ui 没能启动，herdr 在运行吗？</string>
+    <string name="herdr_failed">打不开 herdr web ui：%s</string>
+    <string name="herdr_retry">点这里重试</string>
     <string name="chat_title">对话</string>
     <string name="chat_new">新对话</string>
     <string name="chat_loading">加载中…</string>

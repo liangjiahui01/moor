@@ -832,7 +832,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     // ---- voice input: speech to text without the keyboard ----
 
-    private static final int REQ_PICK = 3, REQ_CAMERA = 4, REQ_MIC_HOLD = 5;
+    private static final int REQ_PICK = 3, REQ_CAMERA = 4, REQ_MIC_HOLD = 5, REQ_WEB_FILES = 6, REQ_WEB_MIC = 7;
+    private android.webkit.ValueCallback<Uri[]> webFiles;
+    private Runnable webMicGranted;
     private VoiceInput voice;
     /** The box's text when dictation started; the transcript goes after it. */
     private String voiceBase = "";
@@ -1098,6 +1100,12 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] results) {
         super.onRequestPermissionsResult(req, perms, results);
+        if (req == REQ_WEB_MIC) {
+            Runnable r = webMicGranted;
+            webMicGranted = null;
+            if (r != null && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) r.run();
+            return;
+        }
         if (req != REQ_MIC_HOLD) return;
         // Granted: hold the box again to talk
         if (results.length == 0 || results[0] != PackageManager.PERMISSION_GRANTED) {
@@ -1463,6 +1471,38 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         chat.show();
     }
 
+    private HerdrWeb herdrWeb;
+
+    @Override
+    public void openHerdrWeb() {
+        if (service == null || service.state() != TermService.State.CONNECTED) {
+            Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (herdrWeb == null) herdrWeb = new HerdrWeb(this, t, new HerdrWeb.Host() {
+            @Override public TermService service() { return service; }
+
+            @Override
+            public void pickFiles(Intent chooser, android.webkit.ValueCallback<Uri[]> result) {
+                if (webFiles != null) webFiles.onReceiveValue(null);
+                webFiles = result;
+                try {
+                    startActivityForResult(chooser, REQ_WEB_FILES);
+                } catch (Exception e) {
+                    webFiles = null;
+                    result.onReceiveValue(null);
+                }
+            }
+
+            @Override
+            public void needMic(Runnable granted) {
+                webMicGranted = granted;
+                requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_WEB_MIC);
+            }
+        });
+        herdrWeb.show();
+    }
+
     private void showFiles() {
         if (service == null || service.state() != TermService.State.CONNECTED) {
             Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
@@ -1611,6 +1651,13 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
+        if (req == REQ_WEB_FILES) {
+            // Always answer the page, or its file input stops working
+            android.webkit.ValueCallback<Uri[]> cb = webFiles;
+            webFiles = null;
+            if (cb != null) cb.onReceiveValue(android.webkit.WebChromeClient.FileChooserParams.parseResult(result, data));
+            return;
+        }
         if (result != RESULT_OK) return;
         Uri u = req == REQ_PICK ? (data != null ? data.getData() : null) : req == REQ_CAMERA ? cameraUri : null;
         if (u == null) return;
@@ -1668,6 +1715,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         lastState = state;
         main.removeCallbacks(hideStatus);
         if (state == TermService.State.CONNECTED) {
+            if (prev != null && prev != TermService.State.CONNECTED && herdrWeb != null) herdrWeb.reconnected();
             if (prev != null && prev != TermService.State.CONNECTED) {
                 main.postDelayed(this::maybeAskBattery, 1500);
                 // The message ends with " · direct" / " · via relay" for WebRTC connections

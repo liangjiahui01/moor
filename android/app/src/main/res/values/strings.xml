@@ -344,6 +344,11 @@
     <string name="k_refresh">Refresh</string>
     <string name="k_files">Files</string>
     <string name="files_browse_title">Browse files</string>
+    <string name="herdr_starting">Opening herdr web ui…</string>
+    <string name="herdr_not_installed">herdr web ui is not installed on this machine.</string>
+    <string name="herdr_not_running">herdr web ui did not start. Is herdr running?</string>
+    <string name="herdr_failed">Could not open herdr web ui: %s</string>
+    <string name="herdr_retry">Tap to try again</string>
     <string name="chat_title">Chat</string>
     <string name="chat_new">New chat</string>
     <string name="chat_loading">Loading…</string>

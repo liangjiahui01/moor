@@ -641,6 +641,29 @@ public class TermService extends Service {
     }
 
     /** Chat: a phone-side port tunnelled to the machine's Paseo daemon, and its credential: {port, token, home}. */
+    /** herdr web ui on the machine, reached through this connection: the local port to load. */
+    void herdrWeb(Result<Integer> cb) {
+        final SshLink l = link;
+        if (l == null || !pythonOk || l.pathDown()) {
+            cb.done(null, l == null || l.pathDown() ? message : getString(R.string.err_no_python));
+            return;
+        }
+        fileIo.execute(() -> {
+            Integer out = null;
+            String err = null;
+            try {
+                org.json.JSONObject o = new org.json.JSONObject(l.exec(Sessions.herdrWebCommand(), null, 30_000));
+                if (o.has("error")) err = o.getString("error");
+                else out = l.forwardLocal(o.getInt("port"));
+            } catch (Exception e) {
+                err = e.getMessage();
+            }
+            final Integer o = out;
+            final String m = err;
+            main.post(() -> cb.done(o, m));
+        });
+    }
+
     void paseo(Result<String[]> cb) {
         final SshLink l = link;
         if (l == null || !pythonOk || l.pathDown()) {
