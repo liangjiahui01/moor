@@ -25,6 +25,7 @@ final class NewSessionSheet {
 
     private static final String[] COMMANDS = {"", "claude", "herdr", null};
 
+    private EditText name, dir;
     private final Context c;
     private final Theme t;
     private final List<String> taken;
@@ -66,7 +67,7 @@ final class NewSessionSheet {
         box.addView(head);
 
         box.addView(label(R.string.field_name));
-        EditText name = field(c, t, "", c.getString(R.string.field_name_hint));
+        name = field(c, t, "", "");
         name.setImeOptions(EditorInfo.IME_ACTION_DONE);
         box.addView(name, new LinearLayout.LayoutParams(-1, dp(50)));
 
@@ -99,7 +100,7 @@ final class NewSessionSheet {
         box.addView(custom, clp);
 
         box.addView(label(R.string.field_dir));
-        EditText dir = field(c, t, dirs.isEmpty() ? "~" : dirs.get(0), "~");
+        dir = field(c, t, dirs.isEmpty() ? "~" : dirs.get(0), "~");
         dir.setTypeface(Ui.mono(c));
         dir.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         box.addView(dir, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -161,10 +162,21 @@ final class NewSessionSheet {
             }
         }
         paint();
-        d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+        // The name is optional: no keyboard at first, so picking what to run and tapping Create is enough
+        android.text.TextWatcher rename = new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int n) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int n) { }
+            @Override public void afterTextChanged(android.text.Editable e) { showAutoName(); }
+        };
+        dir.addTextChangedListener(rename);
+        custom.addTextChangedListener(rename);
+        d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
             | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         d.show();
-        name.requestFocus();
+    }
+
+    private void showAutoName() {
+        if (name != null) name.setHint(c.getString(R.string.field_name_auto, autoName()));
     }
 
     private View option(int k, int[] spec) {
@@ -202,11 +214,29 @@ final class NewSessionSheet {
                 android.content.res.ColorStateList.valueOf(on ? t.onAccent : t.text));
         }
         custom.setVisibility(choice == 3 ? View.VISIBLE : View.GONE);
+        showAutoName();
     }
 
+    /**
+     * A name for an empty name field: the folder it runs in (~/project/moor → moor), or in the home folder what
+     * it runs (claude, herdr, shell), with -2, -3 … when taken.
+     */
     private String autoName() {
-        for (int n = 1; ; n++) {
-            String s = c.getString(R.string.auto_name, n);
+        String d = dir == null ? "" : dir.getText().toString().trim();
+        while (d.endsWith("/") && d.length() > 1) d = d.substring(0, d.length() - 1);
+        String base;
+        if (!d.isEmpty() && !d.equals("~") && !d.equals("/")) {
+            base = d.substring(d.lastIndexOf('/') + 1);
+        } else {
+            String cmd = COMMANDS[choice] != null ? COMMANDS[choice] : (custom == null ? "" : custom.getText().toString().trim());
+            String first = cmd.isEmpty() ? "shell" : cmd.split("\\s+")[0];
+            base = first.substring(first.lastIndexOf('/') + 1);
+        }
+        base = Sessions.cleanName(base);
+        if (base.isEmpty()) base = "shell";
+        if (!taken.contains(base)) return base;
+        for (int n = 2; ; n++) {
+            String s = base + "-" + n;
             if (!taken.contains(s)) return s;
         }
     }

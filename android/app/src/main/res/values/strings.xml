@@ -105,8 +105,8 @@
     <!-- new session -->
     <string name="new_session">New session</string>
     <string name="new_session_hint">Keeps running after you leave</string>
-    <string name="field_name">Name</string>
-    <string name="field_name_hint">e.g. api-refactor</string>
+    <string name="field_name">Name (optional)</string>
+    <string name="field_name_auto">Leave empty for %1$s</string>
     <string name="field_run">Run</string>
     <string name="field_command_hint">Command, e.g. htop</string>
     <string name="field_dir">Start in</string>
@@ -118,7 +118,6 @@
     <string name="run_custom">Custom</string>
     <string name="run_custom_sub">Any command</string>
     <string name="create_open">Create and open</string>
-    <string name="auto_name">session-%1$d</string>
 
     <!-- terminal keys -->
     <string name="k_symbols">Symbols</string>

@@ -93,8 +93,8 @@
 
     <string name="new_session">新建会话</string>
     <string name="new_session_hint">离开后继续运行</string>
-    <string name="field_name">名称</string>
-    <string name="field_name_hint">例如 接口重构</string>
+    <string name="field_name">名称（选填）</string>
+    <string name="field_name_auto">留空则叫 %1$s</string>
     <string name="field_run">运行</string>
     <string name="field_command_hint">命令，例如 htop</string>
     <string name="field_dir">起始目录</string>
@@ -106,7 +106,6 @@
     <string name="run_custom">自定义</string>
     <string name="run_custom_sub">任意命令</string>
     <string name="create_open">创建并打开</string>
-    <string name="auto_name">会话-%1$d</string>
 
     <string name="k_symbols">符号</string>
     <string name="k_ctrl">Ctrl 组合</string>
