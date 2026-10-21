@@ -231,7 +231,6 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     protected void onPause() {
         cancelVoice();
-        if (herdrWeb != null) herdrWeb.cancelVoice();
         if (service != null) service.detachScreen(this);
         super.onPause();
     }

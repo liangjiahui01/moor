@@ -354,8 +354,6 @@
     <string name="herdr_card_working">%d working</string>
     <string name="herdr_card_blocked">%d waiting for you</string>
     <string name="herdr_card_blocked_working">%1$d waiting for you · %2$d working</string>
-    <string name="web_voice_hint">Hold to talk; the text goes into the page\'s box. Slide up to cancel.</string>
-    <string name="web_voice_no_box">No text box to type into: tap one first.</string>
     <string name="chat_title">Chat</string>
     <string name="chat_new">New chat</string>
     <string name="chat_loading">Loading…</string>
