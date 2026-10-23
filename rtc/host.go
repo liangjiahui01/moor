@@ -46,6 +46,8 @@ type host struct {
 	mu     sync.Mutex
 	seen   map[string]time.Time // offer ids already answered
 	active int
+	// Resumable sessions by id: each holds its sshd connection while the phone finds a new path
+	sessions map[string]*hostSession
 }
 
 func hostMain(args []string) {
@@ -64,7 +66,7 @@ func hostMain(args []string) {
 		logf("config: %v", err)
 		os.Exit(1)
 	}
-	h := &host{cfg: cfg, key: key, ssh: *ssh, stun: *stun, api: newAPI(), seen: map[string]time.Time{}}
+	h := &host{cfg: cfg, key: key, ssh: *ssh, stun: *stun, api: newAPI(), seen: map[string]time.Time{}, sessions: map[string]*hostSession{}}
 	backoff := time.Second
 	for {
 		began := time.Now()
@@ -297,7 +299,8 @@ func (h *host) prepare(id string, answers chan Msg) (*pending, error) {
 			finish()
 		}
 	})
-	dc, err := pc.CreateDataChannel("ssh", nil)
+	// The label tells a phone that knows it that this machine resumes sessions; others ignore it
+	dc, err := pc.CreateDataChannel(resumeLabel, nil)
 	if err != nil {
 		finish()
 		return nil, err
@@ -310,19 +313,9 @@ func (h *host) prepare(id string, answers chan Msg) (*pending, error) {
 			finish()
 			return
 		}
-		tcp, err := net.DialTimeout("tcp", h.ssh, 5*time.Second)
-		if err != nil {
-			logf("%s: sshd: %v", id, err)
-			ch.Close()
-			finish()
-			return
-		}
 		logf("%s: connected, %s", id, describePair(pc))
 		go logRTT(pc, id, opened)
-		go func() {
-			logf("%s: closed (%s; a=channel b=sshd)", id, join(ch, tcp))
-			finish()
-		}()
+		go h.serveChannel(id, ch, finish)
 	})
 	offer, err := pc.CreateOffer(nil)
 	if err == nil {
@@ -412,4 +405,206 @@ func logRTT(pc *webrtc.PeerConnection, id string, _ chan struct{}) {
 			logf("%s: rtt %.0f ms", id, s.CurrentRoundTripTime*1000)
 		}
 	}
+}
+
+// serveChannel looks at the phone's first message: a hello opens or resumes a session, anything else
+// (SSH from a phone that doesn't resume) is joined to sshd as before.
+func (h *host) serveChannel(id string, ch *channel, finish func()) {
+	first := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 64<<10)
+		n, err := ch.ReadMsg(buf)
+		if err != nil {
+			first <- nil
+			return
+		}
+		first <- buf[:n]
+	}()
+	var m []byte
+	select {
+	case m = <-first:
+		if m == nil {
+			ch.Close()
+			finish()
+			return
+		}
+		if len(m) > 1 && m[0] == fHello && m[1] == '{' {
+			h.resumable(id, ch, m[1:], finish)
+			return
+		}
+	case <-time.After(3 * time.Second):
+		// A client that waits for the server to speak first: sshd will
+	}
+	tcp, err := net.DialTimeout("tcp", h.ssh, 5*time.Second)
+	if err != nil {
+		logf("%s: sshd: %v", id, err)
+		ch.Close()
+		finish()
+		return
+	}
+	if m == nil {
+		go func() {
+			if b := <-first; b != nil {
+				tcp.Write(b)
+			}
+		}()
+	} else if _, err := tcp.Write(m); err != nil {
+		tcp.Close()
+		ch.Close()
+		finish()
+		return
+	}
+	logf("%s: closed (%s; a=channel b=sshd)", id, join(ch, tcp))
+	finish()
+}
+
+// hostSession is a resumable connection to sshd and the channel carrying it, if any.
+type hostSession struct {
+	*stream
+	sid   string
+	tcp   net.Conn
+	mu    sync.Mutex
+	cur   *channel
+	abort chan struct{} // closed to stop the current channel's serve
+	done  chan struct{} // closed when the current channel's serve returned
+	idle  *time.Timer
+	since time.Time // when it started waiting for its phone
+}
+
+// How long a session waits for its phone to come back on a new path: long enough for a locked phone
+// (the system freezes the app soon after the screen goes off) to resume when it's unlocked.
+const resumeWait = 10 * time.Minute
+
+func (h *host) resumable(id string, ch *channel, hello []byte, finish func()) {
+	defer finish()
+	var hm helloMsg
+	if err := json.Unmarshal(hello, &hm); err != nil || hm.SID == "" {
+		logf("%s: bad hello", id)
+		ch.Close()
+		return
+	}
+	h.mu.Lock()
+	sess := h.sessions[hm.SID]
+	h.mu.Unlock()
+	if !hm.Resume {
+		if sess != nil {
+			ch.Close()
+			return
+		}
+		tcp, err := net.DialTimeout("tcp", h.ssh, 5*time.Second)
+		if err != nil {
+			logf("%s: sshd: %v", id, err)
+			ch.Close()
+			return
+		}
+		sess = &hostSession{sid: hm.SID, tcp: tcp}
+		sess.stream = newStream(tcp, func() {
+			if t, ok := tcp.(*net.TCPConn); ok {
+				t.CloseWrite()
+			}
+		})
+		h.mu.Lock()
+		if len(h.sessions) >= 32 && !h.evictIdle() {
+			h.mu.Unlock()
+			tcp.Close()
+			ch.Close()
+			return
+		}
+		h.sessions[hm.SID] = sess
+		h.mu.Unlock()
+		go sess.pump(tcp)
+		go func() {
+			<-sess.ended
+			tcp.Close()
+			h.mu.Lock()
+			delete(h.sessions, hm.SID)
+			h.mu.Unlock()
+			logf("session %s ended", hm.SID)
+		}()
+		logf("%s: session %s opened", id, hm.SID)
+	} else if sess == nil {
+		logf("%s: session %s is gone", id, hm.SID)
+		writeJSONMsg(ch, fWelcome, welcomeMsg{Gone: true})
+		time.Sleep(500 * time.Millisecond) // let it leave before the channel closes
+		ch.Close()
+		return
+	} else {
+		logf("%s: session %s resumes", id, hm.SID)
+	}
+	// Take over: the old channel (if its path is not known dead yet) stops first, so what we have
+	// received is final when we say it
+	sess.mu.Lock()
+	if sess.idle != nil {
+		sess.idle.Stop()
+	}
+	old, oldAbort, oldDone := sess.cur, sess.abort, sess.done
+	abort, done := make(chan struct{}), make(chan struct{})
+	sess.cur, sess.abort, sess.done = ch, abort, done
+	sess.mu.Unlock()
+	if old != nil {
+		close(oldAbort)
+		<-oldDone
+	}
+	if err := writeJSONMsg(ch, fWelcome, welcomeMsg{Recv: sess.received()}); err != nil {
+		close(done)
+		ch.Close()
+		sess.waitForPhone()
+		return
+	}
+	err := sess.serve(ch, hm.Recv, abort)
+	close(done)
+	if errors.Is(err, errEnded) {
+		return
+	}
+	logf("%s: session %s lost its path (%v)", id, hm.SID, err)
+	if errors.Is(err, errResume) {
+		sess.end()
+		return
+	}
+	sess.mu.Lock()
+	if sess.cur == ch {
+		sess.cur = nil
+		sess.mu.Unlock()
+		sess.waitForPhone()
+		return
+	}
+	sess.mu.Unlock()
+}
+
+// evictIdle ends the session that has waited longest for its phone; h.mu is held. False if none waits.
+func (h *host) evictIdle() bool {
+	var oldest *hostSession
+	for _, s := range h.sessions {
+		s.mu.Lock()
+		if s.cur == nil && (oldest == nil || s.since.Before(oldest.since)) {
+			oldest = s
+		}
+		s.mu.Unlock()
+	}
+	if oldest == nil {
+		return false
+	}
+	delete(h.sessions, oldest.sid)
+	logf("session %s: ended to make room", oldest.sid)
+	go oldest.end()
+	return true
+}
+
+// waitForPhone ends the session unless a phone resumes it in time.
+func (s *hostSession) waitForPhone() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.idle != nil {
+		s.idle.Stop()
+	}
+	s.since = time.Now()
+	s.idle = time.AfterFunc(resumeWait, func() {
+		s.mu.Lock()
+		idle := s.cur == nil
+		s.mu.Unlock()
+		if idle {
+			logf("session %s: no phone came back", s.sid)
+			s.end()
+		}
+	})
 }

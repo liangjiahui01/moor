@@ -86,6 +86,12 @@ final class SshLink implements TerminalSession.Transport {
         return proxy;
     }
 
+    /** A direct connection the machine resumes on a new path: true when it was asked to find one. */
+    boolean repath(String why) {
+        Rtc.Proxy p = proxy;
+        return p != null && p.repath(why);
+    }
+
     /** True when a direct connection's path is known to be dead (no need to probe). */
     boolean pathDown() {
         Rtc.Proxy p = proxy;

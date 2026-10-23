@@ -115,6 +115,8 @@ public class TermService extends Service {
     private long backgroundSince;
     private final Runnable reconnect = this::connect;
     private ConnectivityManager.NetworkCallback netCallback;
+    /** Watches the physical networks: behind a VPN the default network stays the VPN when Wi-Fi comes or goes. */
+    private ConnectivityManager.NetworkCallback physCallback;
     /** Sessions waiting for the user (latest attention event per session). */
     private final Map<String, Event> attention = new HashMap<>();
     /** The machine this service's state (session, attention) belongs to. */
@@ -221,7 +223,7 @@ public class TermService extends Service {
                     if (l != link) return;
                     if (ok) {
                         if (screen != null) screen.onProbe(false);
-                    } else {
+                    } else if (!l.repath("path down after resume")) {
                         reconnectNow("path down after resume");
                     }
                 });
@@ -239,7 +241,9 @@ public class TermService extends Service {
                 Diag.i(TAG, "probe " + (ok ? "ok" : "failed") + " in " + (SystemClock.elapsedRealtime() - p0) + "ms");
                 if (!ok) {
                     Diag.i(TAG, "probe failed after resume");
-                    main.post(() -> { if (l == link) reconnectNow("probe failed"); });
+                    main.post(() -> {
+                        if (l == link && !l.repath("probe failed")) reconnectNow("probe failed");
+                    });
                 }
                 main.post(() -> { if (ok && screen != null) screen.onProbe(false); });
             }, "Probe").start();
@@ -377,6 +381,13 @@ public class TermService extends Service {
         String route = l.route().equals("direct") ? " · " + getString(R.string.route_direct)
             : l.route().equals("relay") ? " · " + getString(R.string.route_relay) : "";
         setState(State.CONNECTED, prefs.user + "@" + prefs.host + route);
+        Rtc.Proxy px = l.proxy();
+        if (px != null) {
+            // While the path is replaced the screen says so; SSH and the session stay as they are
+            px.onResuming = r -> main.post(() -> {
+                if (l == link && screen != null) screen.onProbe(r);
+            });
+        }
         if (python) startEvents(l);
         // Copy the connection log to the machine a moment later, once the session is attached
         main.postDelayed(() -> uploadDiag(l), 4_000);
@@ -876,7 +887,8 @@ public class TermService extends Service {
                     }
                     Diag.i(TAG, "default network changed");
                     if (link != null) {
-                        reconnectNow("network changed");
+                        // A resumable connection moves to a path on the new network; others start over
+                        if (!link.repath("network changed")) reconnectNow("network changed");
                     } else if (state == State.WAITING) {
                         attempt = 0;
                         main.removeCallbacks(reconnect);
@@ -886,6 +898,40 @@ public class TermService extends Service {
             }
         };
         cm.registerDefaultNetworkCallback(netCallback);
+
+        // A resumable connection moves to a new path at once when a physical network comes or goes (the
+        // path may run on it); others are left to the default-network callback above as before
+        final java.util.Set<android.net.Network> known = new java.util.HashSet<>();
+        final long since = SystemClock.elapsedRealtime();
+        physCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(android.net.Network network) {
+                main.post(() -> {
+                    // The callback first lists the networks already up: those are not news
+                    if (!known.add(network) || SystemClock.elapsedRealtime() - since < 2_000) return;
+                    physChanged("network " + network + " up");
+                });
+            }
+
+            @Override
+            public void onLost(android.net.Network network) {
+                main.post(() -> {
+                    if (known.remove(network)) physChanged("network " + network + " lost");
+                });
+            }
+        };
+        try {
+            cm.registerNetworkCallback(new android.net.NetworkRequest.Builder()
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), physCallback);
+        } catch (Exception e) {
+            physCallback = null;
+        }
+    }
+
+    private void physChanged(String why) {
+        if (link == null || state != State.CONNECTED) return;
+        link.repath(why);
     }
 
     // ---- foreground notification ----
@@ -943,6 +989,9 @@ public class TermService extends Service {
 
     @Override
     public void onDestroy() {
+        if (physCallback != null) {
+            try { getSystemService(ConnectivityManager.class).unregisterNetworkCallback(physCallback); } catch (Exception ignored) { }
+        }
         if (netCallback != null) {
             try { getSystemService(ConnectivityManager.class).unregisterNetworkCallback(netCallback); } catch (Exception ignored) { }
         }

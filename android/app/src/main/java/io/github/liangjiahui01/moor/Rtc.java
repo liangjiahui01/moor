@@ -100,6 +100,15 @@ final class Rtc {
         volatile String path = "";
         /** Round-trip time of the direct path in ms, -1 before the first measurement. */
         volatile int rttMs = -1;
+        /** The machine resumes this session on a new path: a dead path costs a pause, not a reconnect. */
+        volatile boolean resumable;
+        /** Looking for a new path to resume on (SSH on top is paused, not dropped). */
+        volatile boolean resuming;
+        /** Told when resuming starts and ends (on the log thread). */
+        volatile java.util.function.Consumer<Boolean> onResuming;
+        /** moor-rtc watches this file: touching it asks for a new path now. */
+        private final File ctl;
+        private long lastRepath;
 
         Proxy(Context c, String signal, String room, String key) {
             this.bin = binary(c);
@@ -107,6 +116,30 @@ final class Rtc {
             this.room = room;
             this.key = key;
             this.routePref = route(c);
+            this.ctl = new File(c.getCacheDir(), "rtc-" + Long.toHexString(System.nanoTime()) + ".ctl");
+        }
+
+        /** Asks moor-rtc to give up the current path and resume on a new one (e.g. the network changed). */
+        boolean repath(String why) {
+            if (!resumable || resuming) return resumable;
+            // Several callbacks report one network change: one new path is enough
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastRepath < 3_000) return true;
+            lastRepath = now;
+            Diag.i(TAG, "repath: " + why);
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(ctl)) {
+                o.write('1');
+            } catch (Exception e) {
+                return false;
+            }
+            ctl.setLastModified(System.currentTimeMillis());
+            return true;
+        }
+
+        private void resumingChanged(boolean r) {
+            resuming = r;
+            java.util.function.Consumer<Boolean> cb = onResuming;
+            if (cb != null) cb.accept(r);
         }
 
         @Override
@@ -116,7 +149,8 @@ final class Rtc {
                 "--signal", signal, "--room", room, "--route", routePref,
                 // A try with no answering path ends after 3 s (a fresh one usually connects at once); on a
                 // network that is just slow, each failure in a row gives the next try longer
-                "--ice-timeout", ICE_WAITS[Math.min(slowTries, ICE_WAITS.length - 1)]));
+                "--ice-timeout", ICE_WAITS[Math.min(slowTries, ICE_WAITS.length - 1)],
+                "--ctl", ctl.getAbsolutePath()));
             // The fallback is a plain connection to the machine's address: not when a route is chosen, and
             // not again soon after it failed (a dead one cost every failed try 10 more seconds)
             Long dead = deadFallbacks.get(fallback);
@@ -135,6 +169,18 @@ final class Rtc {
                     String line;
                     while ((line = r.readLine()) != null) {
                         Diag.i(TAG, line);
+                        if (line.contains("resumable session")) {
+                            resumable = true;
+                            continue;
+                        } else if (line.contains("path lost")) {
+                            pathDown = true;
+                            resumingChanged(true);
+                            continue;
+                        } else if (line.contains("resumed in")) {
+                            pathDown = false;
+                            resumingChanged(false);
+                            continue;
+                        }
                         if (line.contains("route direct")) {
                             route = "direct";
                             path = pathOf(line);
@@ -166,6 +212,7 @@ final class Rtc {
         @Override
         public void close() {
             if (proc != null) proc.destroy();
+            ctl.delete();
         }
     }
 }
