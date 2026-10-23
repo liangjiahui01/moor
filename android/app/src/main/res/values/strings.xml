@@ -255,6 +255,8 @@
     <string name="setup_partial">Not added: %1$s</string>
     <string name="route_direct">direct</string>
     <string name="route_relay">via relay</string>
+    <string name="chip_relay_retry">Tap the ticked route to try a direct path again</string>
+    <string name="route_kept">No path that way, staying on %1$s</string>
     <string name="chip_lan">LAN</string>
     <string name="chip_wan">WAN</string>
     <string name="chip_relay">Relay</string>
@@ -299,8 +301,6 @@
     <string name="route_auto_hint">First path that works; private network usually wins</string>
     <string name="route_lan_hint">Only company or home network, VPN</string>
     <string name="route_wan_hint">Only peer to peer over the internet</string>
-    <string name="route_now">Now: %1$s</string>
-    <string name="route_now_rtt">Now: %1$s · %2$d ms</string>
     <string name="route_now_none">Now: not direct</string>
     <string name="k_quick">Quick commands</string>
     <string name="quick_add">+</string>

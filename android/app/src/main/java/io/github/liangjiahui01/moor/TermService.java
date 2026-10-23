@@ -349,6 +349,15 @@ public class TermService extends Service {
         return l == null ? null : l.proxy();
     }
 
+    /** Moves the connection to another route; without a resumable connection, reconnects with it. */
+    void switchRoute(String route) {
+        Prefs.put(this, "route", route);
+        SshLink l = link;
+        Rtc.Proxy px = l == null ? null : l.proxy();
+        if (state == State.CONNECTED && px != null && px.switchRoute(route)) return;
+        reconnectWithNewSettings();
+    }
+
     void reconnectWithNewSettings() {
         String id = Prefs.currentId(this);
         if (!id.equals(machineId)) {
@@ -386,6 +395,10 @@ public class TermService extends Service {
             // While the path is replaced the screen says so; SSH and the session stay as they are
             px.onResuming = r -> main.post(() -> {
                 if (l == link && screen != null) screen.onProbe(r);
+            });
+            px.onRouteKept = r -> main.post(() -> {
+                int label = "lan".equals(r) ? R.string.route_lan : "wan".equals(r) ? R.string.route_wan : R.string.route_auto;
+                android.widget.Toast.makeText(this, getString(R.string.route_kept, getString(label)), android.widget.Toast.LENGTH_LONG).show();
             });
         }
         if (python) startEvents(l);

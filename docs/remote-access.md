@@ -148,7 +148,7 @@ moor pair --host RELAY_ADDRESS --port 2022 --sshd-port 22
 
 ## Which path is in use
 
-- App: the status reads "Connected · direct", or "Connected · via relay" when it used the fallback address. » panel → Route shows whether the path is private or internet and its round-trip time, and can pin one: the private network (LAN, office network, VPN) is often steadier at the office, peer to peer over the internet suits being out.
+- App: a route tag sits at the right end of the input box: "LAN 105ms" or "WAN 85ms" (direct), "Relay" (no direct path, used the fallback address), "SSH" (no direct connection set up) or "Switching" (resuming on a new path). Tap it for the Route panel: details (including whether a drop resumes), and a choice to pin one route: the private network (LAN, office network, VPN) is often steadier at the office, peer to peer over the internet suits being out. A resumable connection moves to the new route without dropping SSH; when it finds no path in two tries it goes back to the old one. On relay, tapping the ticked route reconnects to try a direct path again.
 - Host: `journalctl --user -u moor-rtc` logs `connected, host … <-> srflx …` for each connection, then `rtt N ms` every 30 seconds, and why it closed.
 - Phone: `adb logcat -s MoorRtc` shows `route direct …` or `route relay …`.
 

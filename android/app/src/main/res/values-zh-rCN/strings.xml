@@ -239,6 +239,8 @@
     <string name="setup_partial">未添加：%1$s</string>
     <string name="route_direct">直连</string>
     <string name="route_relay">中转</string>
+    <string name="chip_relay_retry">点一下打勾的那项，重试直连</string>
+    <string name="route_kept">那条线路不通，保持%1$s</string>
     <string name="chip_lan">内网</string>
     <string name="chip_wan">公网</string>
     <string name="chip_relay">中转</string>
@@ -283,8 +285,6 @@
     <string name="route_auto_hint">哪条先通走哪条，内网优先</string>
     <string name="route_lan_hint">只走公司或家里的内网、VPN</string>
     <string name="route_wan_hint">只走互联网点对点</string>
-    <string name="route_now">当前：%1$s</string>
-    <string name="route_now_rtt">当前：%1$s · %2$d ms</string>
     <string name="route_now_none">当前：未直连</string>
     <string name="k_quick">快捷命令</string>
     <string name="quick_add">＋</string>

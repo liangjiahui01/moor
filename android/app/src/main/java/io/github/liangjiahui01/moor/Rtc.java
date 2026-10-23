@@ -90,7 +90,12 @@ final class Rtc {
     /** JSch proxy: the SSH stream is moor-rtc's stdin/stdout; host:port is where it falls back to. */
     static final class Proxy implements com.jcraft.jsch.Proxy {
         private final File bin;
-        private final String signal, room, key, routePref;
+        private final String signal, room, key;
+        /** The route moor-rtc takes: the setting, or what the app switched to since. */
+        volatile String routePref;
+        private final Context app;
+        /** Told when a route the app switched to found no path and the old one was kept (log thread). */
+        volatile java.util.function.Consumer<String> onRouteKept;
         private Process proc;
         /** "direct", "relay" (fell back to host:port) or "" while connecting. */
         volatile String route = "";
@@ -116,6 +121,7 @@ final class Rtc {
             this.room = room;
             this.key = key;
             this.routePref = route(c);
+            this.app = c.getApplicationContext();
             this.ctl = new File(c.getCacheDir(), "rtc-" + Long.toHexString(System.nanoTime()) + ".ctl");
         }
 
@@ -133,6 +139,21 @@ final class Rtc {
                 return false;
             }
             ctl.setLastModified(System.currentTimeMillis());
+            return true;
+        }
+
+        /** Moves the session to another route without reconnecting; false when only a reconnect can. */
+        boolean switchRoute(String r) {
+            if (!resumable || resuming) return false;
+            Diag.i(TAG, "switch route to " + r);
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(ctl)) {
+                o.write(("route=" + r).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } catch (Exception e) {
+                return false;
+            }
+            ctl.setLastModified(System.currentTimeMillis());
+            lastRepath = android.os.SystemClock.elapsedRealtime();
+            routePref = r;
             return true;
         }
 
@@ -175,6 +196,14 @@ final class Rtc {
                         } else if (line.contains("path lost")) {
                             pathDown = true;
                             resumingChanged(true);
+                            continue;
+                        } else if (line.contains("route kept ")) {
+                            // The route asked for found nothing: the setting goes back too
+                            String[] w = line.substring(line.indexOf("route kept ") + 11).split(" ");
+                            routePref = w[0];
+                            Prefs.put(app, "route", w[0]);
+                            java.util.function.Consumer<String> cb = onRouteKept;
+                            if (cb != null) cb.accept(w[0]);
                             continue;
                         } else if (line.contains("resumed in")) {
                             pathDown = false;

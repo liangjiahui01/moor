@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -15,6 +16,9 @@ const resumeGiveUp = 60 * time.Second
 // A path that stops answering this long after ICE says disconnected is given up for a new one: a
 // resume costs a second or two, waiting for ICE to declare it failed costs four more.
 const quietWait = 1 * time.Second
+
+// Tries on a route the app switched to before going back to the previous one.
+const routeTries = 2
 
 // run carries stdin/stdout over the path and, when the machine resumes sessions, over new paths
 // after one dies, so SSH on top never notices. It doesn't return.
@@ -56,7 +60,20 @@ func (d *dialer2) run(p *path) {
 		}
 		lost := time.Now()
 		logf("path lost (%v), resuming", err)
+		// A route the app asked for: try it a few times, then go back to the one that worked
+		prevRoute := d.route
+		d.askedMu.Lock()
+		if d.asked != "" && d.asked != d.route {
+			d.route = d.asked
+			logf("route set %s", d.route)
+		}
+		d.asked = ""
+		d.askedMu.Unlock()
 		for try := 0; ; try++ {
+			if d.route != prevRoute && try == routeTries {
+				logf("route kept %s (%s found no path)", prevRoute, d.route)
+				d.route = prevRoute
+			}
 			if time.Since(lost) > resumeGiveUp {
 				logf("closed (no path for %s)", resumeGiveUp)
 				os.Exit(3)
@@ -130,6 +147,14 @@ func (d *dialer2) watch(p *path, abort, stop chan struct{}) {
 				continue
 			}
 			if fi, err := os.Stat(d.ctl); err == nil && !fi.ModTime().Equal(ctlTime) {
+				// "route=lan" (or wan, auto): the next path takes only that route
+				if b, err := os.ReadFile(d.ctl); err == nil && len(b) > 6 && string(b[:6]) == "route=" {
+					if r := strings.TrimSpace(string(b[6:])); r == "auto" || r == "lan" || r == "wan" {
+						d.askedMu.Lock()
+						d.asked = r
+						d.askedMu.Unlock()
+					}
+				}
 				logf("new path asked")
 				close(abort)
 				return

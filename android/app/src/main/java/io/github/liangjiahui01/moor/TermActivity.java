@@ -370,7 +370,8 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     private String routeDetail() {
         Rtc.Proxy p = service == null ? null : service.directProxy();
         if (p == null) return getString(R.string.chip_ssh_detail);
-        if ("relay".equals(p.route)) return getString(R.string.chip_relay_detail);
+        if ("relay".equals(p.route)) return getString(R.string.chip_relay_detail) + "\n" + getString(R.string.chip_relay_retry);
+        if (p.path.isEmpty()) return getString(R.string.route_now_none);
         String path = getString("lan".equals(p.path) ? R.string.chip_lan_detail : R.string.chip_wan_detail);
         if (p.rttMs > 0) path += " · " + p.rttMs + " ms";
         return path + "\n" + getString(p.resumable ? R.string.chip_resumable : R.string.chip_not_resumable);
@@ -567,7 +568,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         routeChip.setGravity(Gravity.CENTER);
         routeChip.setPadding(dp(8), 0, dp(8), 0);
         routeChip.setVisibility(View.GONE);
-        routeChip.setOnClickListener(v -> Toast.makeText(this, routeDetail(), Toast.LENGTH_LONG).show());
+        routeChip.setOnClickListener(v -> showRoute());
         FrameLayout.LayoutParams rlp = new FrameLayout.LayoutParams(-2, dp(22), Gravity.END | Gravity.CENTER_VERTICAL);
         rlp.rightMargin = dp(11);
         box.addView(routeChip, rlp);
@@ -1108,7 +1109,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         TextView title = Ui.text(this, getString(R.string.route_title), 20, t.text, Ui.SEMIBOLD);
         title.setPadding(dp(4), 0, 0, dp(6));
         box.addView(title);
-        TextView now = Ui.text(this, routeNow(), 13.5f, t.sub, Ui.REGULAR);
+        TextView now = Ui.text(this, routeDetail(), 13.5f, t.sub, Ui.REGULAR);
         now.setPadding(dp(4), 0, 0, dp(10));
         box.addView(now);
         Dialog d = Ui.bottomSheet(this, t, box);
@@ -1125,21 +1126,24 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             item.addView(hint);
             item.setOnClickListener(v -> {
                 d.dismiss();
-                if (on || service == null) return;
-                Prefs.put(this, "route", key);
+                if (service == null) return;
+                if (on) {
+                    // On relay, the ticked route again means: try a direct path once more
+                    if (relayNow()) service.reconnectWithNewSettings();
+                    return;
+                }
                 Diag.i("TermActivity", "route set to " + key);
-                service.reconnectWithNewSettings();
+                service.switchRoute(key);
+                refreshRoute();
             });
             box.addView(item, new LinearLayout.LayoutParams(-1, -2));
         }
         d.show();
     }
 
-    private String routeNow() {
+    private boolean relayNow() {
         Rtc.Proxy p = service == null ? null : service.directProxy();
-        if (p == null || p.path.isEmpty()) return getString(R.string.route_now_none);
-        String path = getString("lan".equals(p.path) ? R.string.route_lan : R.string.route_wan);
-        return p.rttMs > 0 ? getString(R.string.route_now_rtt, path, p.rttMs) : getString(R.string.route_now, path);
+        return p != null && "relay".equals(p.route);
     }
 
     /**

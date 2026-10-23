@@ -90,6 +90,8 @@ type path struct {
 
 type dialer2 struct {
 	signal, room, key, stun, route, ctl string
+	askedMu                             sync.Mutex
+	asked                               string // route the app asked for, taken at the next resume
 }
 
 // open asks the machine (through the relay) to offer a data channel, answers it and returns it once
