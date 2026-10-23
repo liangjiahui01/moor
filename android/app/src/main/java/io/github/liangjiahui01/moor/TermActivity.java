@@ -49,7 +49,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     private Theme t;
     private TerminalView view;
-    private TextView status, title, subtitle, countLabel;
+    private TextView status, title, subtitle, countLabel, routeChip;
     private View titleDot;
     private SessionPanel panel;
     private View topBar;
@@ -226,10 +226,13 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             service.onScreenResumed();
         }
         refreshTitle();
+        main.removeCallbacks(routeTick);
+        main.post(routeTick);
     }
 
     @Override
     protected void onPause() {
+        main.removeCallbacks(routeTick);
         cancelVoice();
         if (service != null) service.detachScreen(this);
         super.onPause();
@@ -315,6 +318,71 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             }
         });
     }
+
+    /** Fills the route chip from the live connection; a resume can move it to another path. */
+    private void refreshRoute() {
+        if (routeChip == null) return;
+        if (service == null || service.state() != TermService.State.CONNECTED) {
+            routeChip.setVisibility(View.GONE);
+            fitInputToChip();
+            return;
+        }
+        Rtc.Proxy p = service.directProxy();
+        String text;
+        int color;
+        if (p == null) {
+            text = getString(R.string.chip_ssh);
+            color = t.sub;
+        } else if (p.resuming) {
+            text = getString(R.string.chip_resuming);
+            color = t.amber;
+        } else if ("relay".equals(p.route)) {
+            text = getString(R.string.chip_relay);
+            color = t.amber;
+        } else if (!p.path.isEmpty()) {
+            boolean lan = "lan".equals(p.path);
+            String name = getString(lan ? R.string.chip_lan : R.string.chip_wan);
+            text = p.rttMs > 0 ? getString(R.string.chip_rtt, name, p.rttMs) : name;
+            color = lan ? t.ok : t.accent;
+        } else {
+            routeChip.setVisibility(View.GONE);
+            fitInputToChip();
+            return;
+        }
+        routeChip.setText(text);
+        routeChip.setTextColor(color);
+        routeChip.setBackground(Ui.round((color & 0x00ffffff) | (t.dark ? 0x26000000 : 0x1f000000), dp(11)));
+        routeChip.setVisibility(View.VISIBLE);
+        fitInputToChip();
+    }
+
+    /** Keeps typed text clear of the route chip at the box's right end. */
+    private void fitInputToChip() {
+        if (input == null || routeChip == null) return;
+        int right = dp(16);
+        if (routeChip.getVisibility() == View.VISIBLE) {
+            routeChip.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            right = routeChip.getMeasuredWidth() + dp(11 + 6);
+        }
+        if (input.getPaddingRight() != right) input.setPadding(dp(16), dp(10), right, dp(10));
+    }
+
+    private String routeDetail() {
+        Rtc.Proxy p = service == null ? null : service.directProxy();
+        if (p == null) return getString(R.string.chip_ssh_detail);
+        if ("relay".equals(p.route)) return getString(R.string.chip_relay_detail);
+        String path = getString("lan".equals(p.path) ? R.string.chip_lan_detail : R.string.chip_wan_detail);
+        if (p.rttMs > 0) path += " · " + p.rttMs + " ms";
+        return path + "\n" + getString(p.resumable ? R.string.chip_resumable : R.string.chip_not_resumable);
+    }
+
+    private final Runnable routeTick = new Runnable() {
+        @Override
+        public void run() {
+            refreshRoute();
+            main.postDelayed(this, 2_000);
+        }
+    };
 
     private final Runnable titlePoll = new Runnable() {
         @Override
@@ -491,7 +559,20 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             }
             return false;
         });
-        bar.addView(input, new LinearLayout.LayoutParams(0, -2, 1f));
+        // How this connection runs (private network / internet direct, relay, plain SSH), at the box's
+        // right end so it shows with or without the top bar; tap for details
+        FrameLayout box = new FrameLayout(this);
+        box.addView(input, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL));
+        routeChip = Ui.oneLine(Ui.text(this, "", 11f, t.sub, Ui.MEDIUM), TextUtils.TruncateAt.END);
+        routeChip.setGravity(Gravity.CENTER);
+        routeChip.setPadding(dp(8), 0, dp(8), 0);
+        routeChip.setVisibility(View.GONE);
+        routeChip.setOnClickListener(v -> Toast.makeText(this, routeDetail(), Toast.LENGTH_LONG).show());
+        FrameLayout.LayoutParams rlp = new FrameLayout.LayoutParams(-2, dp(22), Gravity.END | Gravity.CENTER_VERTICAL);
+        rlp.rightMargin = dp(11);
+        box.addView(routeChip, rlp);
+        bar.addView(box, new LinearLayout.LayoutParams(0, -2, 1f));
+        bar.post(this::refreshRoute);
 
         sendBtn = roundButton(R.drawable.ic_arrow_up, R.string.input_send, true, v -> sendInput());
         bar.addView(sendBtn, roundLp());
@@ -1690,6 +1771,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
 
     @Override
     public void onProbe(boolean probing) {
+        refreshRoute();
         if (probing) {
             main.removeCallbacks(hideStatus);
             showStatus(getString(R.string.state_checking), t.amber);
@@ -1711,6 +1793,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
     @Override
     public void onState(TermService.State state, String message) {
         panel.onState(state, message);
+        refreshRoute();
         TermService.State prev = lastState;
         lastState = state;
         main.removeCallbacks(hideStatus);
