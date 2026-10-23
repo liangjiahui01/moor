@@ -79,7 +79,7 @@ final class Rtc {
         return old;
     }
 
-    private static final String[] ICE_WAITS = {"3s", "6s", "10s"};
+    private static final String[] ICE_WAITS = {"5s", "6s", "10s"};
     /** Tries in a row that ended with no path answering. */
     private static volatile int slowTries;
 

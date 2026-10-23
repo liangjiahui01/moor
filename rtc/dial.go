@@ -28,7 +28,7 @@ func dialMain(args []string) {
 	fallback := fs.String("fallback", "", "HOST:PORT to use when no direct path is found")
 	stun := fs.String("stun", defaultSTUN, "STUN servers")
 	timeout := fs.Duration("timeout", 10*time.Second, "how long to try a direct path")
-	iceTimeout := fs.Duration("ice-timeout", 3*time.Second, "give up this try when no path answers this long (the app tries again at once)")
+	iceTimeout := fs.Duration("ice-timeout", 5*time.Second, "give up this try when no path answers this long (the app tries again at once)")
 	route := fs.String("route", "auto", "auto (first path that works), lan (private addresses only) or wan (public only)")
 	ctl := fs.String("ctl", "", "file the app touches to ask for a new path now (e.g. the network changed)")
 	fs.Parse(args)
