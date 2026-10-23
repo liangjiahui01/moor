@@ -134,6 +134,7 @@ final class SshLink implements TerminalSession.Transport {
                     Diag.i("SshLink", "read ended: " + e);
                 }
                 if (closed || !session.isConnected()) {
+                    if (!closed) Diag.i("SshLink", "session dropped (" + reason + ")");
                     close(); // reports the dropped connection
                     return;
                 }
@@ -171,7 +172,10 @@ final class SshLink implements TerminalSession.Transport {
                     if (ch != null) ch.disconnect();
                 }
                 // The events stream outlives every screen, so it is what notices a dead connection on the session list
-                if (!closed && !session.isConnected()) close();
+                if (!closed && !session.isConnected()) {
+                    Diag.i("SshLink", "session dropped (events)");
+                    close();
+                }
             }
         };
         t.setDaemon(true);

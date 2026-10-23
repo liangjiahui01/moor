@@ -256,7 +256,7 @@
     <string name="route_direct">direct</string>
     <string name="route_relay">via relay</string>
     <string name="chip_relay_retry">Tap the ticked route to try a direct path again</string>
-    <string name="route_kept">No path that way, staying on %1$s</string>
+    <string name="route_kept">%1$s: no path from this network, staying on %2$s</string>
     <string name="chip_lan">LAN</string>
     <string name="chip_wan">WAN</string>
     <string name="chip_relay">Relay</string>
@@ -300,7 +300,7 @@
     <string name="route_wan">Internet</string>
     <string name="route_auto_hint">First path that works; private network usually wins</string>
     <string name="route_lan_hint">Only company or home network, VPN</string>
-    <string name="route_wan_hint">Only peer to peer over the internet</string>
+    <string name="route_wan_hint">Only peer to peer over the internet; office networks often block it, mobile data and home usually work</string>
     <string name="route_now_none">Now: not direct</string>
     <string name="k_quick">Quick commands</string>
     <string name="quick_add">+</string>

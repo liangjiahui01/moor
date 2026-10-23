@@ -94,8 +94,8 @@ final class Rtc {
         /** The route moor-rtc takes: the setting, or what the app switched to since. */
         volatile String routePref;
         private final Context app;
-        /** Told when a route the app switched to found no path and the old one was kept (log thread). */
-        volatile java.util.function.Consumer<String> onRouteKept;
+        /** Told (tried, kept) when a route the app switched to found no path and the old one was kept (log thread). */
+        volatile java.util.function.BiConsumer<String, String> onRouteKept;
         private Process proc;
         /** "direct", "relay" (fell back to host:port) or "" while connecting. */
         volatile String route = "";
@@ -202,8 +202,8 @@ final class Rtc {
                             String[] w = line.substring(line.indexOf("route kept ") + 11).split(" ");
                             routePref = w[0];
                             Prefs.put(app, "route", w[0]);
-                            java.util.function.Consumer<String> cb = onRouteKept;
-                            if (cb != null) cb.accept(w[0]);
+                            java.util.function.BiConsumer<String, String> cb = onRouteKept;
+                            if (cb != null) cb.accept(w.length > 1 ? w[1].replace("(", "") : "", w[0]);
                             continue;
                         } else if (line.contains("resumed in")) {
                             pathDown = false;

@@ -16,8 +16,11 @@ final class JschSetup {
         JSch.setConfig("ssh-ed25519", "com.jcraft.jsch.bc.SignatureEd25519");
         JSch.setConfig("ssh-ed448", "com.jcraft.jsch.bc.SignatureEd448");
         JSch.setLogger(new com.jcraft.jsch.Logger() {
-            @Override public boolean isEnabled(int level) { return level >= WARN; }
-            @Override public void log(int level, String message) { android.util.Log.w("JSch", message); }
+            @Override public boolean isEnabled(int level) { return level >= INFO; }
+            @Override public void log(int level, String message) {
+                // Why a session ended is logged at INFO; the rest of INFO is the handshake, skipped
+                if (level >= WARN || message.contains("leaving main loop")) Diag.i("JSch", message);
+            }
         });
         done = true;
     }

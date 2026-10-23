@@ -349,6 +349,10 @@ public class TermService extends Service {
         return l == null ? null : l.proxy();
     }
 
+    private String routeLabel(String r) {
+        return getString("lan".equals(r) ? R.string.route_lan : "wan".equals(r) ? R.string.route_wan : R.string.route_auto);
+    }
+
     /** Moves the connection to another route; without a resumable connection, reconnects with it. */
     void switchRoute(String route) {
         Prefs.put(this, "route", route);
@@ -396,10 +400,8 @@ public class TermService extends Service {
             px.onResuming = r -> main.post(() -> {
                 if (l == link && screen != null) screen.onProbe(r);
             });
-            px.onRouteKept = r -> main.post(() -> {
-                int label = "lan".equals(r) ? R.string.route_lan : "wan".equals(r) ? R.string.route_wan : R.string.route_auto;
-                android.widget.Toast.makeText(this, getString(R.string.route_kept, getString(label)), android.widget.Toast.LENGTH_LONG).show();
-            });
+            px.onRouteKept = (tried, kept) -> main.post(() -> android.widget.Toast.makeText(this,
+                getString(R.string.route_kept, routeLabel(tried), routeLabel(kept)), android.widget.Toast.LENGTH_LONG).show());
         }
         if (python) startEvents(l);
         // Copy the connection log to the machine a moment later, once the session is attached
@@ -611,8 +613,10 @@ public class TermService extends Service {
                 Sessions.Listing r = Sessions.parse(l.exec(Sessions.listCommand(), null, 8_000));
                 main.post(() -> cb.done(r, null));
             } catch (Exception e) {
-                // A dead connection: close it, which starts a reconnect
-                if (!l.probe()) l.close();
+                // A dead connection: a resumable one moves to a new path (or is already looking for one),
+                // anything else is closed, which starts a reconnect
+                Diag.i(TAG, "list failed: " + e.getMessage());
+                if (!l.probe() && !l.repath("list failed")) l.close();
                 main.post(() -> cb.done(null, getString(R.string.err_list_failed, e.getMessage())));
             }
         });
