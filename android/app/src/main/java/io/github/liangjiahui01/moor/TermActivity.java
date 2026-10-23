@@ -158,7 +158,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         panel = new SessionPanel(this, this, t);
         top.addView(panel, new FrameLayout.LayoutParams(-1, -1));
         setContentView(top);
-        // No previous session: open straight into the session list
+        // From the launcher icon, or no previous session: open into the session list (a notification
+        // opens its own session)
+        if (fromLauncher(getIntent())) Prefs.saveSession(this, null);
         if (Prefs.load(this).session == null) panel.show(null);
 
         fontSize = Prefs.load(this).fontSize;
@@ -184,9 +186,24 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         handleOpenIntent(intent);
     }
 
-    /** A notification tap carries the session to open. */
+    /** The launcher icon (not a notification, the recents list or another app). */
+    private static boolean fromLauncher(Intent i) {
+        return i != null && Intent.ACTION_MAIN.equals(i.getAction()) && i.hasCategory(Intent.CATEGORY_LAUNCHER)
+            && !i.hasExtra(TermService.EXTRA_SESSION) && !i.getBooleanExtra(LAUNCH_HANDLED, false);
+    }
+
+    private static final String LAUNCH_HANDLED = "launch_handled";
+
+    /** A notification tap carries the session to open; the launcher icon opens the session list. */
     private void handleOpenIntent(Intent intent) {
         if (intent == null || service == null) return;
+        if (fromLauncher(intent)) {
+            // Once per tap: a recreate (theme change) hands the same intent back
+            intent.putExtra(LAUNCH_HANDLED, true);
+            if (service.currentSession() != null) service.leaveSession();
+            panel.show(null);
+            return;
+        }
         if (Intent.ACTION_SEND.equals(intent.getAction())) {
             Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
             intent.setAction(null);
