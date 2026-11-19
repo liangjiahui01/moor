@@ -693,6 +693,16 @@ public class TermService extends Service {
     /** Chat: a phone-side port tunnelled to the machine's Paseo daemon, and its credential: {port, token, home}. */
     /** herdr web ui on the machine, reached through this connection: the local port to load. */
     void herdrWeb(Result<Integer> cb) {
+        localWeb(Sessions.herdrWebCommand(), cb);
+    }
+
+    /** The code reader web page on the machine, reached through this connection: the local port to load. */
+    void codeWeb(Result<Integer> cb) {
+        localWeb(Sessions.codeWebCommand(), cb);
+    }
+
+    /** Asks the machine where a loopback web page listens ({port} or {error}) and forwards a phone-side port to it. */
+    private void localWeb(String command, Result<Integer> cb) {
         final SshLink l = link;
         if (l == null || !pythonOk || l.pathDown()) {
             cb.done(null, l == null || l.pathDown() ? message : getString(R.string.err_no_python));
@@ -702,7 +712,7 @@ public class TermService extends Service {
             Integer out = null;
             String err = null;
             try {
-                org.json.JSONObject o = new org.json.JSONObject(l.exec(Sessions.herdrWebCommand(), null, 30_000));
+                org.json.JSONObject o = new org.json.JSONObject(l.exec(command, null, 30_000));
                 if (o.has("error")) err = o.getString("error");
                 else out = l.forwardLocal(o.getInt("port"));
             } catch (Exception e) {

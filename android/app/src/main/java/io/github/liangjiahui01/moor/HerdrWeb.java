@@ -33,6 +33,8 @@ import android.widget.TextView;
  * SSH connection (a local port forward), which the plugin lets in without pairing, like any SSH tunnel.
  * The window is hidden, not closed, on the way out, so the page keeps its state between visits.
  * The page dictates with its own voice input; the web view only grants it the microphone.
+ * The same window shows the code reader (a read-only code browsing page named in ~/.config/moor/code-web), which is
+ * reached the same way.
  */
 final class HerdrWeb {
     interface Host {
@@ -48,6 +50,8 @@ final class HerdrWeb {
     private final Activity a;
     private final Theme t;
     private final Host host;
+    /** the code reader instead of herdr web ui */
+    private final boolean code;
     private final Handler main = new Handler(Looper.getMainLooper());
     private Dialog dialog;
     private WebView web;
@@ -56,9 +60,14 @@ final class HerdrWeb {
     private boolean failed;
 
     HerdrWeb(Activity a, Theme t, Host host) {
+        this(a, t, host, false);
+    }
+
+    HerdrWeb(Activity a, Theme t, Host host, boolean code) {
         this.a = a;
         this.t = t;
         this.host = host;
+        this.code = code;
     }
 
     void show() {
@@ -75,12 +84,15 @@ final class HerdrWeb {
     private void connect() {
         TermService s = host.service();
         if (s == null) return;
-        if (loadedPort < 0 || failed) showBanner(a.getString(R.string.herdr_starting), false);
-        s.herdrWeb((port, err) -> {
+        if (loadedPort < 0 || failed) showBanner(a.getString(code ? R.string.code_starting : R.string.herdr_starting), false);
+        TermService.Result<Integer> got = (port, err) -> {
             if (dialog == null || !dialog.isShowing()) return;
             if (err != null) {
-                String why = "not_installed".equals(err) ? a.getString(R.string.herdr_not_installed)
-                    : "not_running".equals(err) ? a.getString(R.string.herdr_not_running) : a.getString(R.string.herdr_failed, err);
+                String why = code
+                    ? ("not_configured".equals(err) ? a.getString(R.string.code_not_configured)
+                        : "not_running".equals(err) ? a.getString(R.string.code_not_running) : a.getString(R.string.code_failed, err))
+                    : ("not_installed".equals(err) ? a.getString(R.string.herdr_not_installed)
+                        : "not_running".equals(err) ? a.getString(R.string.herdr_not_running) : a.getString(R.string.herdr_failed, err));
                 showBanner(why, true);
                 return;
             }
@@ -91,7 +103,9 @@ final class HerdrWeb {
             } else {
                 hideBanner();
             }
-        });
+        };
+        if (code) s.codeWeb(got);
+        else s.herdrWeb(got);
     }
 
     private void build() {
@@ -133,7 +147,7 @@ final class HerdrWeb {
             public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError e) {
                 if (!req.isForMainFrame()) return;
                 failed = true;
-                showBanner(a.getString(R.string.herdr_failed, String.valueOf(e.getDescription())), true);
+                showBanner(a.getString(code ? R.string.code_failed : R.string.herdr_failed, String.valueOf(e.getDescription())), true);
             }
         });
         web.setWebChromeClient(new WebChromeClient() {

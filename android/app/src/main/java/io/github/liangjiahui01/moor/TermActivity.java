@@ -1573,7 +1573,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         chat.show();
     }
 
-    private HerdrWeb herdrWeb;
+    private HerdrWeb herdrWeb, codeWeb;
 
     @Override
     public void openHerdrWeb() {
@@ -1581,7 +1581,22 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
             Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
             return;
         }
-        if (herdrWeb == null) herdrWeb = new HerdrWeb(this, t, new HerdrWeb.Host() {
+        if (herdrWeb == null) herdrWeb = new HerdrWeb(this, t, webHost());
+        herdrWeb.show();
+    }
+
+    @Override
+    public void openCodeWeb() {
+        if (service == null || service.state() != TermService.State.CONNECTED) {
+            Toast.makeText(this, R.string.err_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (codeWeb == null) codeWeb = new HerdrWeb(this, t, webHost(), true);
+        codeWeb.show();
+    }
+
+    private HerdrWeb.Host webHost() {
+        return new HerdrWeb.Host() {
             @Override public TermService service() { return service; }
 
             @Override
@@ -1601,8 +1616,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
                 webMicGranted = granted;
                 requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_WEB_MIC);
             }
-        });
-        herdrWeb.show();
+        };
     }
 
     private void showFiles() {
@@ -1819,7 +1833,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         lastState = state;
         main.removeCallbacks(hideStatus);
         if (state == TermService.State.CONNECTED) {
-            if (prev != null && prev != TermService.State.CONNECTED && herdrWeb != null) herdrWeb.reconnected();
+            if (prev != null && prev != TermService.State.CONNECTED) {
+                if (herdrWeb != null) herdrWeb.reconnected();
+                if (codeWeb != null) codeWeb.reconnected();
+            }
             if (prev != null && prev != TermService.State.CONNECTED) {
                 main.postDelayed(this::maybeAskBattery, 1500);
                 // The message ends with " · direct" / " · via relay" for WebRTC connections

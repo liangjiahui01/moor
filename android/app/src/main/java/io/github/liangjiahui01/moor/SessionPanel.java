@@ -34,6 +34,9 @@ final class SessionPanel extends FrameLayout {
         /** herdr web ui (a herdr plugin) on the machine, in a web view. */
         void openHerdrWeb();
 
+        /** The code reader web page on the machine, in a web view. */
+        void openCodeWeb();
+
         TermService service();
 
         void openSettings();
@@ -49,7 +52,7 @@ final class SessionPanel extends FrameLayout {
     private final LinearLayout list;
     private final View newButton;
     private final TextView sortChip, herdrSub;
-    private final LinearLayout herdrCard;
+    private final LinearLayout herdrCard, codeCard;
     private Sessions.Listing last;
     private long lastAt;
     private boolean loading;
@@ -132,6 +135,29 @@ final class SessionPanel extends FrameLayout {
         // The list's cards sit 16dp from both edges; the header is padded 20 / 12
         hcl.setMargins(-dp(4), dp(16), dp(4), 0);
         head.addView(herdrCard, hcl);
+
+        // The code reader, when the machine names one: read-only browsing of its repositories
+        codeCard = Ui.row(c);
+        codeCard.setGravity(Gravity.CENTER_VERTICAL);
+        codeCard.setPadding(dp(14), dp(12), dp(12), dp(12));
+        codeCard.setBackground(Ui.pressable(t, Ui.outline(t.surface, t.line, dp(1), dp(18)), dp(18)));
+        FrameLayout ctile = new FrameLayout(c);
+        ctile.setBackground(Ui.round(t.accentSoft, dp(12)));
+        ctile.addView(Ui.icon(c, R.drawable.ic_file, t.accent, 22), new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        codeCard.addView(ctile, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout ctext = Ui.column(c);
+        ctext.setPadding(dp(14), 0, dp(8), 0);
+        ctext.addView(Ui.text(c, c.getString(R.string.code_card_title), 17, t.text, Ui.SEMIBOLD));
+        TextView csub = Ui.oneLine(Ui.text(c, c.getString(R.string.code_card_sub), 13, t.sub, Ui.REGULAR), TextUtils.TruncateAt.END);
+        csub.setPadding(0, dp(2), 0, 0);
+        ctext.addView(csub);
+        codeCard.addView(ctext, Ui.weight(1));
+        codeCard.addView(Ui.icon(c, R.drawable.ic_chevron_right, t.sub, 20));
+        codeCard.setOnClickListener(v -> host.openCodeWeb());
+        codeCard.setVisibility(GONE);
+        LinearLayout.LayoutParams ccl = new LinearLayout.LayoutParams(-1, -2);
+        ccl.setMargins(-dp(4), dp(12), dp(4), 0);
+        head.addView(codeCard, ccl);
 
         LinearLayout titleRow = Ui.row(c);
         titleRow.setPadding(0, dp(14), dp(4), 0);
@@ -254,6 +280,7 @@ final class SessionPanel extends FrameLayout {
         Context c = getContext();
         list.removeAllViews();
         renderHerdr();
+        codeCard.setVisibility(last != null && last.codePort > 0 ? VISIBLE : GONE);
         styleSortChip();
         TermService s = host.service();
         if (s == null || s.state() != TermService.State.CONNECTED) {

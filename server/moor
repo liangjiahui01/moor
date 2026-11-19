@@ -11,6 +11,9 @@
         Where the local Paseo daemon listens and its local credential, for the app's chat (JSON).
     moor herdrweb
         Where herdr web ui listens, starting it when it is installed but not running (JSON).
+    moor codeweb
+        Where a read-only code reader web page on this machine listens (JSON). Name its
+        loopback port in ~/.config/moor/code-web (just the number) to get a Code card in the app.
     moor file open TEXT... / roots / changes / diff ROOT PATH / raw PATH
         Read-only file preview for the app: open a path seen on the screen, list
         uncommitted changes in the projects being worked on, show one file's diff.
@@ -1852,6 +1855,9 @@ def cmd_ls():
     if installed:
         n = herdr_agent_counts()
         print("\t".join(["W", str(port)] + ([str(x) for x in n] if n else [])))
+    code_port = code_web_port()
+    if code_port:
+        print(f"C\t{code_port}")
     for i in r.get("items", []):
         clean = lambda v: str(v).replace("\t", " ").replace("\n", " ")
         preview = "\x1f".join(clean(l) for l in i.get("preview", []))
@@ -2422,6 +2428,26 @@ def cmd_herdrweb():
     out_json({"error": "not_running", "port": port})
 
 
+def code_web_port():
+    """A read-only code reader web page on the machine's loopback, named by ~/.config/moor/code-web: its port, else 0."""
+    try:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+        v = pathlib.Path(base, "moor", "code-web").read_text().strip()
+    except OSError:
+        return 0
+    return int(v) if v.isdigit() and 0 < int(v) < 65536 else 0
+
+
+def cmd_codeweb():
+    port = code_web_port()
+    if not port:
+        out_json({"error": "not_configured"})
+    elif port_open(port):
+        out_json({"port": port})
+    else:
+        out_json({"error": "not_running", "port": port})
+
+
 def cmd_file(a):
     if a[:1] == ["open"]:
         ap = argparse.ArgumentParser(prog="moor file open")
@@ -2480,6 +2506,8 @@ def main():
         cmd_paseo()
     elif a[:1] == ["herdrweb"]:
         cmd_herdrweb()
+    elif a[:1] == ["codeweb"]:
+        cmd_codeweb()
     elif a[:1] == ["file"]:
         cmd_file(a[1:])
     elif a[:1] == ["attach"] and len(a) == 2:

@@ -82,6 +82,11 @@ final class Sessions {
         return PY + " herdrweb";
     }
 
+    /** Port of a read-only code reader web page on the machine (~/.config/moor/code-web), as JSON. */
+    static String codeWebCommand() {
+        return PY + " codeweb";
+    }
+
     static String paseoCommand() {
         return PY + " paseo";
     }
@@ -102,6 +107,8 @@ final class Sessions {
         int webPort;
         /** herdr's agents: all, working, waiting for the user; -1 when the machine did not say */
         int agents = -1, working = -1, blocked = -1;
+        /** a code reader web page is named on the machine (its port), else 0 */
+        int codePort;
         final List<Info> items = new ArrayList<>();
     }
 
@@ -121,6 +128,8 @@ final class Sessions {
                     l.working = (int) parseLong(f[3]);
                     l.blocked = (int) parseLong(f[4]);
                 }
+            } else if (f[0].equals("C") && f.length >= 2) {
+                l.codePort = (int) parseLong(f[1]);
             } else if (f[0].equals("S") && f.length >= 8) {
                 Info i = new Info();
                 i.name = f[1];
