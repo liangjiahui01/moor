@@ -367,6 +367,8 @@
     <string name="herdr_card_blocked">%d waiting for you</string>
     <string name="herdr_card_blocked_working">%1$d waiting for you · %2$d working</string>
     <string name="code_card_title">Code</string>
+    <string name="code_close">Close the code reader</string>
+    <string name="herdr_close">Close herdr</string>
     <string name="code_card_sub">Browse repositories, read-only</string>
     <string name="code_starting">Opening the code reader…</string>
     <string name="code_not_configured">No code reader is set up on this machine. Put its port in ~/.config/moor/code-web.</string>

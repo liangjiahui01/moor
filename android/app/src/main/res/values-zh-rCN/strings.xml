@@ -351,6 +351,8 @@
     <string name="herdr_card_blocked">%d 个等你处理</string>
     <string name="herdr_card_blocked_working">%1$d 个等你处理 · %2$d 个在跑</string>
     <string name="code_card_title">代码</string>
+    <string name="code_close">收起代码阅读页</string>
+    <string name="herdr_close">收起 herdr 页</string>
     <string name="code_card_sub">只读浏览仓库代码</string>
     <string name="code_starting">正在打开代码阅读页…</string>
     <string name="code_not_configured">这台机器上没配代码阅读页，把它的端口写进 ~/.config/moor/code-web。</string>

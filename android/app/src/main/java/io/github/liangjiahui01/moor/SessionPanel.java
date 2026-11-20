@@ -322,6 +322,16 @@ final class SessionPanel extends FrameLayout {
         for (Sessions.Info i : rest) list.addView(card(i, now, i.name.equals(cur), s.attentionFor(i.name)));
     }
 
+    /** The machine runs herdr web ui (as of the last listing). */
+    boolean hasHerdrWeb() {
+        return last != null && last.webPort > 0;
+    }
+
+    /** The machine has a code reader set up and running (as of the last listing). */
+    boolean hasCodeWeb() {
+        return last != null && last.codePort > 0;
+    }
+
     private void renderHerdr() {
         boolean on = last != null && last.webPort > 0;
         herdrCard.setVisibility(on ? VISIBLE : GONE);

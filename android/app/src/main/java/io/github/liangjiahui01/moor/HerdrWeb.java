@@ -24,6 +24,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
@@ -34,7 +35,8 @@ import android.widget.TextView;
  * The window is hidden, not closed, on the way out, so the page keeps its state between visits.
  * The page dictates with its own voice input; the web view only grants it the microphone.
  * The same window shows the code reader (a read-only code browsing page named in ~/.config/moor/code-web), which is
- * reached the same way.
+ * reached the same way. Both get a bar on top: its close button puts the page away (Back still steps back in the
+ * page) and its other button switches to the other page, so the two can be flipped between, each kept where it was.
  */
 final class HerdrWeb {
     interface Host {
@@ -45,6 +47,12 @@ final class HerdrWeb {
 
         /** Asks for the microphone, then runs granted (only if allowed). */
         void needMic(Runnable granted);
+
+        /** Whether the other page (the code reader from herdr, herdr from the code reader) is there to switch to. */
+        boolean hasOther(boolean code);
+
+        /** Opens the other page; this one is already hidden. */
+        void openOther(boolean code);
     }
 
     private final Activity a;
@@ -56,6 +64,7 @@ final class HerdrWeb {
     private Dialog dialog;
     private WebView web;
     private TextView banner;
+    private View other;
     private int loadedPort = -1;
     private boolean failed;
 
@@ -72,6 +81,7 @@ final class HerdrWeb {
 
     void show() {
         if (dialog == null) build();
+        other.setVisibility(host.hasOther(code) ? View.VISIBLE : View.GONE);
         dialog.show();
         connect();
     }
@@ -193,7 +203,25 @@ final class HerdrWeb {
         root.addView(banner, blp);
         banner.setVisibility(View.GONE);
 
-        dialog.setContentView(root);
+        LinearLayout col = Ui.column(a);
+        col.setBackgroundColor(t.bg);
+        LinearLayout bar = Ui.row(a);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(2), 0, dp(10), 0);
+        bar.addView(Ui.iconButton(a, t, R.drawable.ic_back, t.text,
+            a.getString(code ? R.string.code_close : R.string.herdr_close), v -> dialog.hide()));
+        bar.addView(Ui.text(a, code ? a.getString(R.string.code_card_title) : "herdr", 15.5f, t.text, Ui.SEMIBOLD), Ui.weight(1));
+        other = Ui.secondaryButton(a, t, code ? "herdr" : a.getString(R.string.code_card_title), v -> {
+            dialog.hide();
+            host.openOther(!code);
+        });
+        bar.addView(other, new LinearLayout.LayoutParams(-2, dp(34)));
+        col.addView(bar, new LinearLayout.LayoutParams(-1, dp(48)));
+        View line = new View(a);
+        line.setBackgroundColor(t.divider);
+        col.addView(line, new LinearLayout.LayoutParams(-1, 1));
+        col.addView(root, new LinearLayout.LayoutParams(-1, 0, 1f));
+        dialog.setContentView(col);
         Window w = dialog.getWindow();
         w.setBackgroundDrawable(new ColorDrawable(t.bg));
         w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);

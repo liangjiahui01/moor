@@ -1616,6 +1616,17 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
                 webMicGranted = granted;
                 requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_WEB_MIC);
             }
+
+            @Override
+            public boolean hasOther(boolean code) {
+                return code ? panel.hasHerdrWeb() : panel.hasCodeWeb();
+            }
+
+            @Override
+            public void openOther(boolean code) {
+                if (code) openCodeWeb();
+                else openHerdrWeb();
+            }
         };
     }
 
