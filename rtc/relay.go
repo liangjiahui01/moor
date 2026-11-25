@@ -27,6 +27,8 @@ type relay struct {
 	// pins holds each room's machine proof (see hostAuth), from the first machine that showed one:
 	// someone who only knows the room can't take the machine's place
 	pins map[string]string
+	// pipes are tunnels a phone asked for, waiting for the machine's end (tunnel.go)
+	pipes map[string]*pendingPipe
 }
 
 var upgrader = websocket.Upgrader{ReadBufferSize: 16 << 10, WriteBufferSize: 16 << 10, CheckOrigin: func(*http.Request) bool { return true }}
@@ -35,7 +37,7 @@ func relayMain(args []string) {
 	fs := flag.NewFlagSet("relay", flag.ExitOnError)
 	listen := fs.String("listen", ":80", "address to listen on")
 	fs.Parse(args)
-	r := &relay{rooms: map[string]*room{}, pins: map[string]string{}}
+	r := &relay{rooms: map[string]*room{}, pins: map[string]string{}, pipes: map[string]*pendingPipe{}}
 	http.HandleFunc("/ws", r.serve)
 	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("moor-rtc relay\n")) })
 	logf("relay listening on %s", *listen)
@@ -60,7 +62,9 @@ func (r *relay) dropIfEmpty(id string) {
 
 func (r *relay) serve(w http.ResponseWriter, req *http.Request) {
 	role, id := req.URL.Query().Get("role"), req.URL.Query().Get("room")
-	if (role != "host" && role != "client") || !roomRE.MatchString(id) {
+	pid := req.URL.Query().Get("id")
+	if (role != "host" && role != "client" && role != "pipe" && role != "hpipe") || !roomRE.MatchString(id) ||
+		(role == "hpipe" && (pid == "" || len(pid) > 32)) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -74,6 +78,10 @@ func (r *relay) serve(w http.ResponseWriter, req *http.Request) {
 		} else if auth != "" && len(r.pins) < 100000 {
 			r.pins[id] = auth
 		}
+	} else if role == "hpipe" {
+		// A tunnel's machine end only for the machine that holds the room
+		pin, ok := r.pins[id]
+		denied = !ok || !validMAC(req.Header.Get(hostAuthHeader), pin)
 	}
 	r.mu.Unlock()
 	if tooMany {
@@ -110,9 +118,14 @@ func (r *relay) serve(w http.ResponseWriter, req *http.Request) {
 	}()
 	defer close(stop)
 	defer c.Close()
-	if role == "host" {
+	switch role {
+	case "host":
 		r.serveHost(id, c)
-	} else {
+	case "pipe":
+		r.servePipe(id, c)
+	case "hpipe":
+		r.serveHostPipe(id, pid, c)
+	default:
 		r.serveClient(id, c)
 	}
 }

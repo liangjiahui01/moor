@@ -395,6 +395,7 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (p.path.isEmpty()) return getString(R.string.route_now_none);
         if (p.jump) {
             String path = p.rttMs > 0 && p.upMs > 0 ? getString(R.string.chip_jump_detail, p.rttMs, p.upMs) : getString(R.string.chip_jump);
+            if (p.tunnel) path += "\n" + getString(R.string.chip_jump_tunnel);
             return path + "\n" + getString(p.resumable ? R.string.chip_resumable : R.string.chip_not_resumable);
         }
         String path = getString("lan".equals(p.path) ? R.string.chip_lan_detail : R.string.chip_wan_detail);

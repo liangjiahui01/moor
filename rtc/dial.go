@@ -29,9 +29,10 @@ func dialMain(args []string) {
 	stun := fs.String("stun", defaultSTUN, "STUN servers")
 	timeout := fs.Duration("timeout", 10*time.Second, "how long to try a direct path")
 	iceTimeout := fs.Duration("ice-timeout", 5*time.Second, "give up this try when no path answers this long (the app tries again at once)")
-	route := fs.String("route", "auto", "auto (first path that works), lan (private addresses only) or wan (public only)")
+	route := fs.String("route", "auto", "auto (first path that works), lan (private addresses only), wan (public only) or tunnel (with --pipe: through the relay only)")
 	ctl := fs.String("ctl", "", "file the app touches to ask for a new path now (e.g. the network changed)")
 	via := fs.String("via", "", "go through the jump host of this name (see moor-rtc via)")
+	pipe := fs.Bool("pipe", false, "when no direct path opens, tunnel through the relay (TCP)")
 	fs.Parse(args)
 	if *keyStr == "" {
 		*keyStr = os.Getenv("MOOR_RTC_KEY") // keeps the key off the command line
@@ -48,8 +49,20 @@ func dialMain(args []string) {
 	useBuiltinDNS()
 	androidNetwork()
 
-	d := &dialer2{signal: *signal, room: *roomID, key: *keyStr, stun: *stun, route: *route, ctl: *ctl}
-	p, err := d.open(*timeout, *iceTimeout)
+	d := &dialer2{signal: *signal, room: *roomID, key: *keyStr, stun: *stun, route: *route, ctl: *ctl, pipe: *pipe}
+	if d.pipe {
+		// A direct path on the same network opens within a second; past that, the tunnel is quicker
+		*iceTimeout = min(*iceTimeout, 1500*time.Millisecond)
+	}
+	var p *path
+	err := errors.New("tunnel only")
+	if d.route != "tunnel" {
+		p, err = d.open(*timeout, *iceTimeout)
+	}
+	if err != nil && d.pipe {
+		logf("no direct path (%v), tunneling", err)
+		p, err = d.openPipe()
+	}
 	if err == nil {
 		d.run(p)
 	}
@@ -91,15 +104,18 @@ func reportRTT(pc *webrtc.PeerConnection) {
 
 // path is an open data channel to the machine and what it runs on.
 type path struct {
-	pc     *webrtc.PeerConnection
-	dc     *webrtc.DataChannel
-	ch     *channel
-	failed chan struct{} // closed when ICE fails
+	pc     *webrtc.PeerConnection // nil on a tunnel
+	raw    *channel               // the data channel, nil on a tunnel
+	ch     msgConn
+	label  string        // resumeLabel when the machine resumes sessions on it
+	failed chan struct{} // closed when ICE fails (or a tunnel goes quiet)
 	state  chan webrtc.ICEConnectionState
+	close  func()
 }
 
 type dialer2 struct {
 	signal, room, key, stun, route, ctl string
+	pipe                                bool // a tunnel through the relay when no direct path opens
 	askedMu                             sync.Mutex
 	asked                               string // route the app asked for, taken at the next resume
 }
@@ -274,7 +290,7 @@ func (d *dialer2) open(timeout, iceTimeout time.Duration) (*path, error) {
 	}
 	logf("route direct %s", describePair(pc))
 	go reportRTT(pc)
-	return &path{pc: pc, dc: dc, ch: ch, failed: failed, state: states}, nil
+	return &path{pc: pc, raw: ch, ch: ch, label: dc.Label(), failed: failed, state: states, close: func() { pc.Close() }}, nil
 }
 
 // useBuiltinDNS: Android has no /etc/resolv.conf, so Go's resolver would find no server.

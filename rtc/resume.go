@@ -323,6 +323,15 @@ func (s *stream) receive(stop chan struct{}, rmu *sync.Mutex, ch msgConn, write 
 				s.end()
 				return errEnded
 			}
+		case fPing:
+			// A phone on a tunnel measuring its round trip: echo it
+			if err := write(append([]byte{fPong}, buf[1:n]...)); err != nil {
+				return err
+			}
+		case fPong:
+			if t, ok := ch.(interface{ gotPong([]byte) }); ok {
+				t.gotPong(buf[:n])
+			}
 		case fBye:
 			// The peer's input ended: it has nothing more to say, and the connection is closing
 			rmu.Lock()

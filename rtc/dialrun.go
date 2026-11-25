@@ -23,7 +23,7 @@ const routeTries = 2
 // run carries stdin/stdout over the path and, when the machine resumes sessions, over new paths
 // after one dies, so SSH on top never notices. It doesn't return.
 func (d *dialer2) run(p *path) {
-	if p.dc.Label() != resumeLabel {
+	if p.label != resumeLabel {
 		// A machine that doesn't resume: a dead path ends the process right away (closing the channel
 		// can hang on a dead path), and the app reconnects as soon as SSH sees our stdout close
 		go func() {
@@ -31,13 +31,16 @@ func (d *dialer2) run(p *path) {
 			logf("closed (path failed)")
 			os.Exit(3)
 		}()
-		logf("closed (%s; a=app b=channel), ice %s", join(stdio{}, p.ch), p.pc.ICEConnectionState())
+		logf("closed (%s; a=app b=channel), ice %s", join(stdio{}, p.raw), p.pc.ICEConnectionState())
 		p.pc.Close()
 		os.Exit(0)
 	}
 	sid := randID(12)
 	w, err := handshake(p.ch, helloMsg{SID: sid})
 	if err != nil || w.Gone {
+		if _, tunnel := p.ch.(*wsMsg); tunnel {
+			logf("route none: tunnel: %v", err) // the app counts this as a failed connect
+		}
 		logf("closed (no session: %v)", err)
 		os.Exit(3)
 	}
@@ -52,7 +55,7 @@ func (d *dialer2) run(p *path) {
 		go d.watch(p, abort, stop)
 		err := s.serve(p.ch, w.Recv, abort)
 		close(stop)
-		go p.pc.Close() // can hang on a dead path
+		go p.close() // can hang on a dead path
 		if errors.Is(err, errEnded) {
 			logf("closed (ended)")
 			os.Exit(0)
@@ -86,25 +89,34 @@ func (d *dialer2) run(p *path) {
 			if try < 2 {
 				iceWait = 1500 * time.Millisecond
 			}
-			np, err := d.open(10*time.Second, iceWait)
+			var np *path
+			err := errors.New("tunnel only")
+			if d.route != "tunnel" {
+				np, err = d.open(10*time.Second, iceWait)
+			}
+			if err != nil && d.pipe {
+				logf("no direct path (%v), tunneling", err)
+				np, err = d.openPipe()
+			}
 			if err != nil {
 				logf("route none: %v", err)
 				time.Sleep(300 * time.Millisecond)
 				continue
 			}
-			if np.dc.Label() != resumeLabel {
-				np.pc.Close()
+			if np.label != resumeLabel {
+				np.close()
 				logf("closed (the machine no longer resumes)")
 				os.Exit(3)
 			}
 			w, err = handshake(np.ch, helloMsg{SID: sid, Resume: true, Recv: s.received()})
 			if err != nil {
-				np.pc.Close()
+				np.close()
 				logf("resume: %v", err)
+				time.Sleep(300 * time.Millisecond)
 				continue
 			}
 			if w.Gone {
-				np.pc.Close()
+				np.close()
 				logf("closed (session gone)")
 				os.Exit(3)
 			}

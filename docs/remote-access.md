@@ -164,6 +164,8 @@ moor-rtc host --config rtc-jump.json --ssh MACHINE:22
 
 In the app, pick "Jump host" in the Route panel. The marker shows the two round trips added up (phone to jump host, jump host to machine); the details list them apart. Going through the jump host or leaving it is a reconnect (it holds the session, and resuming covers its leg); after two failed connects in a row the route goes back to Auto. SSH still checks the machine's host key end to end; the jump host can't see inside.
 
+When the jump host sits behind a NAT that can't be punched through (a company network, say) and no direct path opens, the phone tunnels through the relay's WebSocket instead (TCP, on the port the relay already has, no new ports): both sides connect out to the relay, which only copies messages, and what it copies is still end-to-end encrypted SSH. The marker still shows both legs added up; the details say it goes through the relay.
+
 ## Which path is in use
 
 - App: a route tag sits at the right end of the input box: "LAN 105ms" or "WAN 85ms" (direct), "Relay" (no direct path, used the fallback address), "SSH" (no direct connection set up) or "Switching" (resuming on a new path). Tap it for the Route panel: details (including whether a drop resumes), and a choice to pin one route: the private network (LAN, office network, VPN) is often steadier at the office, peer to peer over the internet suits being out. A resumable connection moves to the new route without dropping SSH; when it finds no path in two tries it goes back to the old one. On relay, tapping the ticked route reconnects to try a direct path again.

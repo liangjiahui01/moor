@@ -245,6 +245,11 @@ func (h *host) session() error {
 			}(m)
 		case "taken":
 			take(m.ID)
+		case "pipe":
+			// A phone that found no direct path asks for a tunnel through the relay
+			if h.accept(m) {
+				go h.openPipe(m)
+			}
 		case "answer", "cand":
 			if m.T == "answer" {
 				take(m.ID) // a relay that doesn't say "taken"
@@ -485,7 +490,7 @@ type hostSession struct {
 	sid   string
 	tcp   net.Conn
 	mu    sync.Mutex
-	cur   *channel
+	cur   msgConn
 	abort chan struct{} // closed to stop the current channel's serve
 	done  chan struct{} // closed when the current channel's serve returned
 	idle  *time.Timer
@@ -497,7 +502,7 @@ type hostSession struct {
 // (the system freezes the app soon after the screen goes off) to resume when it's unlocked.
 const resumeWait = 10 * time.Minute
 
-func (h *host) resumable(id string, ch *channel, hello []byte, finish func()) {
+func (h *host) resumable(id string, ch msgConn, hello []byte, finish func()) {
 	defer finish()
 	var hm helloMsg
 	if err := json.Unmarshal(hello, &hm); err != nil || hm.SID == "" {

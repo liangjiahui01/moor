@@ -115,6 +115,8 @@ final class Rtc {
         /** Through the jump host: the path above ends there, and it is upMs more to the machine (-1: not told). */
         final boolean jump;
         volatile int upMs = -1;
+        /** The path is a tunnel through the relay (TCP), not a direct one. */
+        volatile boolean tunnel;
         /** The machine resumes this session on a new path: a dead path costs a pause, not a reconnect. */
         volatile boolean resumable;
         /** Looking for a new path to resume on (SSH on top is paused, not dropped). */
@@ -191,6 +193,8 @@ final class Rtc {
             if (jump) {
                 cmd.add("--via");
                 cmd.add(JUMP);
+                // No direct path to the jump host (it sits behind a company NAT): tunnel through the relay
+                cmd.add("--pipe");
             }
             if (useFallback) {
                 cmd.add("--fallback");
@@ -213,7 +217,8 @@ final class Rtc {
                         } else if (line.contains("upstream ")) {
                             upMs = rttOf(line.replace("upstream", "rtt"), upMs);
                             continue;
-                        } else if (jump && line.contains("route none")) {
+                        } else if (jump && !resumable && line.contains("route none")) {
+                            // Only a connect that never got going counts; tries while resuming are normal
                             jumpFailed();
                             continue;
                         } else if (line.contains("path lost")) {
@@ -236,6 +241,7 @@ final class Rtc {
                         if (line.contains("route direct")) {
                             route = "direct";
                             path = pathOf(line);
+                            tunnel = line.contains("route direct pipe");
                         } else if (line.contains(" rtt ")) rttMs = rttOf(line, rttMs);
                         else if (line.contains("route relay")) route = "relay";
                         else if (line.contains(" fallback: ")) deadFallbacks.put(fallback, android.os.SystemClock.elapsedRealtime() + FALLBACK_REST_MS);

@@ -302,10 +302,11 @@
     <string name="route_lan_hint">Only company or home network, VPN</string>
     <string name="route_wan_hint">Only peer to peer over the internet; office networks often block it, mobile data and home usually work</string>
     <string name="route_jump">Jump host</string>
-    <string name="route_jump_hint">Through the machine\'s jump host: faster when the phone is close to it and it has a steady path to the machine. Set it up first (moor-rtc via)</string>
+    <string name="route_jump_hint">Through the machine\'s jump host: faster when the phone is close to it and it has a steady path to the machine; through the relay when there is no direct path to it. Set it up first (moor-rtc via)</string>
     <string name="route_jump_off">Jump host unreachable, back to Auto</string>
     <string name="chip_jump">Jump</string>
     <string name="chip_jump_detail">Through the jump host · phone to it %1$d ms, it to the machine %2$d ms</string>
+    <string name="chip_jump_tunnel">No direct path to the jump host: through the relay over TCP</string>
     <string name="route_now_none">Now: not direct</string>
     <string name="k_quick">Quick commands</string>
     <string name="quick_add">+</string>
