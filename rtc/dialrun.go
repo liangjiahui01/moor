@@ -89,15 +89,7 @@ func (d *dialer2) run(p *path) {
 			if try < 2 {
 				iceWait = 1500 * time.Millisecond
 			}
-			var np *path
-			err := errors.New("tunnel only")
-			if d.route != "tunnel" {
-				np, err = d.open(10*time.Second, iceWait)
-			}
-			if err != nil && d.pipe {
-				logf("no direct path (%v), tunneling", err)
-				np, err = d.openPipe()
-			}
+			np, err := d.connect(10*time.Second, iceWait)
 			if err != nil {
 				logf("route none: %v", err)
 				time.Sleep(300 * time.Millisecond)

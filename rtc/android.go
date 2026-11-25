@@ -3,6 +3,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"strconv"
 
@@ -34,3 +35,5 @@ func sdkToRelease(sdk int) int {
 		return 10
 	}
 }
+
+func localAddrs() ([]net.Addr, error) { return anet.InterfaceAddrs() }

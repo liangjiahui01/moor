@@ -33,6 +33,7 @@ func dialMain(args []string) {
 	ctl := fs.String("ctl", "", "file the app touches to ask for a new path now (e.g. the network changed)")
 	via := fs.String("via", "", "go through the jump host of this name (see moor-rtc via)")
 	pipe := fs.Bool("pipe", false, "when no direct path opens, tunnel through the relay (TCP)")
+	memo := fs.String("memo", "", "with --pipe: file remembering networks where only the tunnel worked")
 	fs.Parse(args)
 	if *keyStr == "" {
 		*keyStr = os.Getenv("MOOR_RTC_KEY") // keeps the key off the command line
@@ -49,20 +50,12 @@ func dialMain(args []string) {
 	useBuiltinDNS()
 	androidNetwork()
 
-	d := &dialer2{signal: *signal, room: *roomID, key: *keyStr, stun: *stun, route: *route, ctl: *ctl, pipe: *pipe}
+	d := &dialer2{signal: *signal, room: *roomID, key: *keyStr, stun: *stun, route: *route, ctl: *ctl, pipe: *pipe, memo: *memo}
 	if d.pipe {
 		// A direct path on the same network opens within a second; past that, the tunnel is quicker
 		*iceTimeout = min(*iceTimeout, 1500*time.Millisecond)
 	}
-	var p *path
-	err := errors.New("tunnel only")
-	if d.route != "tunnel" {
-		p, err = d.open(*timeout, *iceTimeout)
-	}
-	if err != nil && d.pipe {
-		logf("no direct path (%v), tunneling", err)
-		p, err = d.openPipe()
-	}
+	p, err := d.connect(*timeout, *iceTimeout)
 	if err == nil {
 		d.run(p)
 	}
@@ -115,7 +108,8 @@ type path struct {
 
 type dialer2 struct {
 	signal, room, key, stun, route, ctl string
-	pipe                                bool // a tunnel through the relay when no direct path opens
+	pipe                                bool   // a tunnel through the relay when no direct path opens
+	memo                                string // file of networks that needed the tunnel (memo.go)
 	askedMu                             sync.Mutex
 	asked                               string // route the app asked for, taken at the next resume
 }

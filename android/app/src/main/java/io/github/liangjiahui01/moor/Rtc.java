@@ -195,6 +195,9 @@ final class Rtc {
                 cmd.add(JUMP);
                 // No direct path to the jump host (it sits behind a company NAT): tunnel through the relay
                 cmd.add("--pipe");
+                // Networks where only the tunnel worked go straight to it next time
+                cmd.add("--memo");
+                cmd.add(new File(app.getCacheDir(), "rtc-tunnel-memo.json").getAbsolutePath());
             }
             if (useFallback) {
                 cmd.add("--fallback");

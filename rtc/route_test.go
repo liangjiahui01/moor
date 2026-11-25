@@ -57,3 +57,24 @@ func TestViaConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTunnelMemo(t *testing.T) {
+	path := t.TempDir() + "/memo.json"
+	if tunnelRemembered(path, "192.168.1.0") {
+		t.Fatal("remembered before anything was noted")
+	}
+	rememberTunnel(path, "192.168.1.0", true)
+	if !tunnelRemembered(path, "192.168.1.0") || tunnelRemembered(path, "10.0.0.0") {
+		t.Fatal("memo should hold only the noted network")
+	}
+	rememberTunnel(path, "192.168.1.0", false)
+	if tunnelRemembered(path, "192.168.1.0") {
+		t.Fatal("a direct path should clear the memo")
+	}
+	if tunnelRemembered("", "x") || tunnelRemembered(path, "") {
+		t.Fatal("no file or no key means no memo")
+	}
+	if networkKey() == "" {
+		t.Log("no network key on this machine")
+	}
+}
