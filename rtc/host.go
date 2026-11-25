@@ -37,6 +37,27 @@ func initMain(args []string) {
 	logf("wrote %s; start `moor-rtc host`, then pair again with `moor pair` so the phone learns it", *path)
 }
 
+func viaMain(args []string) {
+	fs := flag.NewFlagSet("via", flag.ExitOnError)
+	name := fs.String("name", "", "jump host name, the one the app passes as --via")
+	path := fs.String("config", defaultConfigPath(), "this machine's config")
+	fs.Parse(args)
+	if *name == "" {
+		logf("--name is required")
+		os.Exit(2)
+	}
+	c, err := loadConfig(*path)
+	if err == nil {
+		c, err = viaConfig(c, *name)
+	}
+	if err != nil {
+		logf("config: %v", err)
+		os.Exit(1)
+	}
+	b, _ := json.MarshalIndent(c, "", "  ")
+	os.Stdout.Write(append(b, '\n'))
+}
+
 type host struct {
 	cfg    Config
 	key    []byte
@@ -469,6 +490,7 @@ type hostSession struct {
 	done  chan struct{} // closed when the current channel's serve returned
 	idle  *time.Timer
 	since time.Time // when it started waiting for its phone
+	up    int       // ms to sshd when it is on another machine (see welcomeMsg.Up)
 }
 
 // How long a session waits for its phone to come back on a new path: long enough for a locked phone
@@ -491,6 +513,7 @@ func (h *host) resumable(id string, ch *channel, hello []byte, finish func()) {
 			ch.Close()
 			return
 		}
+		began := time.Now()
 		tcp, err := net.DialTimeout("tcp", h.ssh, 5*time.Second)
 		if err != nil {
 			logf("%s: sshd: %v", id, err)
@@ -498,6 +521,9 @@ func (h *host) resumable(id string, ch *channel, hello []byte, finish func()) {
 			return
 		}
 		sess = &hostSession{sid: hm.SID, tcp: tcp}
+		if a, ok := tcp.RemoteAddr().(*net.TCPAddr); ok && !a.IP.IsLoopback() {
+			sess.up = max(1, int(time.Since(began).Milliseconds())) // a connect is one round trip
+		}
 		sess.stream = newStream(tcp, func() {
 			if t, ok := tcp.(*net.TCPConn); ok {
 				t.CloseWrite()
@@ -545,7 +571,7 @@ func (h *host) resumable(id string, ch *channel, hello []byte, finish func()) {
 		close(oldAbort)
 		<-oldDone
 	}
-	if err := writeJSONMsg(ch, fWelcome, welcomeMsg{Recv: sess.received()}); err != nil {
+	if err := writeJSONMsg(ch, fWelcome, welcomeMsg{Recv: sess.received(), Up: sess.up}); err != nil {
 		close(done)
 		ch.Close()
 		sess.waitForPhone()

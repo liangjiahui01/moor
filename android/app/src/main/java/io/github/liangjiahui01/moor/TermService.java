@@ -350,7 +350,8 @@ public class TermService extends Service {
     }
 
     private String routeLabel(String r) {
-        return getString("lan".equals(r) ? R.string.route_lan : "wan".equals(r) ? R.string.route_wan : R.string.route_auto);
+        return getString("lan".equals(r) ? R.string.route_lan : "wan".equals(r) ? R.string.route_wan
+            : Rtc.JUMP.equals(r) ? R.string.route_jump : R.string.route_auto);
     }
 
     /** Moves the connection to another route; without a resumable connection, reconnects with it. */

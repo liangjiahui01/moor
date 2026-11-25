@@ -4,6 +4,7 @@
 //	moor-rtc relay --listen :80                 signaling server: introduces the two sides, carries no data
 //	moor-rtc init --signal ws://HOST/ws         on the machine: create ~/.config/moor/rtc.json (room and key)
 //	moor-rtc host                               on the machine: answer the phone, connect channels to sshd
+//	moor-rtc via --name N                       on the machine: print rtc.json for a jump host named N
 //	moor-rtc dial --signal U --room R --key K   in the app: one SSH connection on stdin/stdout
 //
 // SSH runs inside the channel unchanged, so it stays end-to-end encrypted and host keys are
@@ -34,6 +35,8 @@ func main() {
 		initMain(args)
 	case "host":
 		hostMain(args)
+	case "via":
+		viaMain(args)
 	case "dial":
 		dialMain(args)
 	case "version":
@@ -50,6 +53,7 @@ func usage() {
   moor-rtc relay [--listen :80]
   moor-rtc init --signal ws://HOST[:PORT]/ws [--config PATH]
   moor-rtc host [--config PATH] [--ssh 127.0.0.1:22]
-  moor-rtc dial --signal URL --room ROOM --key KEY [--fallback HOST:PORT]`)
+  moor-rtc via --name NAME [--config PATH]     (then on the jump host: moor-rtc host --config FILE --ssh THIS_MACHINE:22)
+  moor-rtc dial --signal URL --room ROOM --key KEY [--via NAME] [--fallback HOST:PORT]`)
 	os.Exit(2)
 }

@@ -38,3 +38,22 @@ func TestKeepCandidates(t *testing.T) {
 		}
 	}
 }
+
+func TestViaConfig(t *testing.T) {
+	c := Config{Signal: "ws://x/ws", Room: "NJqcghSeGpOxGPA0LNEKsQ", Key: randID(32)}
+	a, err := viaConfig(c, "jump")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := viaConfig(c, "jump")
+	o, _ := viaConfig(c, "other")
+	if a != b || a.Room == o.Room || a.Key == o.Key || a.Room == c.Room || a.Key == c.Key {
+		t.Fatalf("derived configs: %+v %+v %+v", a, b, o)
+	}
+	if !roomRE.MatchString(a.Room) {
+		t.Fatalf("room %q not accepted by the relay", a.Room)
+	}
+	if _, err := decodeKey(a.Key); err != nil {
+		t.Fatal(err)
+	}
+}

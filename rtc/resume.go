@@ -46,6 +46,9 @@ type helloMsg struct {
 type welcomeMsg struct {
 	Recv uint64 `json:"recv"` // bytes of the phone's output the machine has
 	Gone bool   `json:"gone,omitempty"`
+	// Up is the round trip in ms from the machine that answered to sshd, when sshd is on another machine
+	// (a jump host); the phone adds it to its own path's round trip
+	Up int `json:"up,omitempty"`
 }
 
 // msgConn is a data channel seen as messages.

@@ -42,6 +42,9 @@ func (d *dialer2) run(p *path) {
 		os.Exit(3)
 	}
 	logf("resumable session %s", sid)
+	if w.Up > 0 {
+		logf("upstream %d ms", w.Up)
+	}
 	s := newStream(os.Stdout, func() { os.Stdout.Close() })
 	go s.pump(os.Stdin)
 	for {

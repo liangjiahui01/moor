@@ -30,11 +30,18 @@ final class Rtc {
         return !signal.isEmpty() && !room.isEmpty() && !key.isEmpty() && binary(c) != null;
     }
 
-    /** Which paths a direct connection may take: "auto" (first that works), "lan" or "wan". */
+    /**
+     * Which paths a direct connection may take: "auto" (first that works), "lan", "wan", or "jump" (through
+     * the machine's jump host, set up there with `moor-rtc via --name jump`).
+     */
     static String route(Context c) {
         String r = Prefs.raw(c).getString("route", "auto");
-        return "lan".equals(r) || "wan".equals(r) ? r : "auto";
+        return "lan".equals(r) || "wan".equals(r) || JUMP.equals(r) ? r : "auto";
     }
+
+    static final String JUMP = "jump";
+    /** Connects through the jump host that failed in a row; at two the route goes back to auto. */
+    private static volatile int jumpFails;
 
     /**
      * "lan" or "wan" from a "route direct <type> <addr>:<port> <-> <type> <addr>:<port>" line: private when
@@ -105,6 +112,9 @@ final class Rtc {
         volatile String path = "";
         /** Round-trip time of the direct path in ms, -1 before the first measurement. */
         volatile int rttMs = -1;
+        /** Through the jump host: the path above ends there, and it is upMs more to the machine (-1: not told). */
+        final boolean jump;
+        volatile int upMs = -1;
         /** The machine resumes this session on a new path: a dead path costs a pause, not a reconnect. */
         volatile boolean resumable;
         /** Looking for a new path to resume on (SSH on top is paused, not dropped). */
@@ -121,6 +131,7 @@ final class Rtc {
             this.room = room;
             this.key = key;
             this.routePref = route(c);
+            this.jump = JUMP.equals(routePref);
             this.app = c.getApplicationContext();
             this.ctl = new File(c.getCacheDir(), "rtc-" + Long.toHexString(System.nanoTime()) + ".ctl");
         }
@@ -144,7 +155,8 @@ final class Rtc {
 
         /** Moves the session to another route without reconnecting; false when only a reconnect can. */
         boolean switchRoute(String r) {
-            if (!resumable || resuming) return false;
+            // The jump host holds its own sessions: going through it or leaving it is a new connection
+            if (!resumable || resuming || jump || JUMP.equals(r)) return false;
             Diag.i(TAG, "switch route to " + r);
             try (java.io.FileOutputStream o = new java.io.FileOutputStream(ctl)) {
                 o.write(("route=" + r).getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -167,7 +179,7 @@ final class Rtc {
         public void connect(com.jcraft.jsch.SocketFactory sf, String host, int port, int timeout) throws Exception {
             final String fallback = (host.contains(":") ? "[" + host + "]" : host) + ":" + port;
             java.util.List<String> cmd = new java.util.ArrayList<>(java.util.Arrays.asList(bin.getAbsolutePath(), "dial",
-                "--signal", signal, "--room", room, "--route", routePref,
+                "--signal", signal, "--room", room, "--route", jump ? "auto" : routePref,
                 // A try with no answering path ends after 3 s (a fresh one usually connects at once); on a
                 // network that is just slow, each failure in a row gives the next try longer
                 "--ice-timeout", ICE_WAITS[Math.min(slowTries, ICE_WAITS.length - 1)],
@@ -176,6 +188,10 @@ final class Rtc {
             // not again soon after it failed (a dead one cost every failed try 10 more seconds)
             Long dead = deadFallbacks.get(fallback);
             boolean useFallback = "auto".equals(routePref) && (dead == null || android.os.SystemClock.elapsedRealtime() > dead);
+            if (jump) {
+                cmd.add("--via");
+                cmd.add(JUMP);
+            }
             if (useFallback) {
                 cmd.add("--fallback");
                 cmd.add(fallback);
@@ -192,6 +208,13 @@ final class Rtc {
                         Diag.i(TAG, line);
                         if (line.contains("resumable session")) {
                             resumable = true;
+                            jumpFails = 0;
+                            continue;
+                        } else if (line.contains("upstream ")) {
+                            upMs = rttOf(line.replace("upstream", "rtt"), upMs);
+                            continue;
+                        } else if (jump && line.contains("route none")) {
+                            jumpFailed();
                             continue;
                         } else if (line.contains("path lost")) {
                             pathDown = true;
@@ -227,6 +250,16 @@ final class Rtc {
             }, "MoorRtcLog");
             t.setDaemon(true);
             t.start();
+        }
+
+        /** Two failed connects in a row through the jump host (it's down, or this network can't reach it): back to auto. */
+        private void jumpFailed() {
+            if (++jumpFails < 2) return;
+            jumpFails = 0;
+            Diag.i(TAG, "jump host unreachable, route back to auto");
+            Prefs.put(app, "route", "auto");
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                android.widget.Toast.makeText(app, R.string.route_jump_off, android.widget.Toast.LENGTH_LONG).show());
         }
 
         @Override

@@ -146,6 +146,24 @@ moor pair --host RELAY_ADDRESS --port 2022 --sshd-port 22
 
 `--sshd-port` is the host's local sshd port, which `moor pair` uses to read the host key for the QR code. You still pair with your host: the relay server only forwards TCP, and both the SSH host key and the login key belong to the host.
 
+## Jump host (optional)
+
+When the phone's path to the machine is unsteady (an office network reaching a machine in another region, say) and a machine nearby has a steady path to it, let that one be a jump host: the phone connects to it directly and it connects on to the machine's sshd over TCP.
+
+On the machine, make the jump host's config (its room and key come from the machine's key, so the phone needs no new pairing; the jump host holds only its own key and can't stand in for the machine):
+
+```sh
+moor-rtc via --name jump > rtc-jump.json
+```
+
+Copy `rtc-jump.json` to the jump host (mode 600) and keep this running there:
+
+```sh
+moor-rtc host --config rtc-jump.json --ssh MACHINE:22
+```
+
+In the app, pick "Jump host" in the Route panel. The marker shows the two round trips added up (phone to jump host, jump host to machine); the details list them apart. Going through the jump host or leaving it is a reconnect (it holds the session, and resuming covers its leg); after two failed connects in a row the route goes back to Auto. SSH still checks the machine's host key end to end; the jump host can't see inside.
+
 ## Which path is in use
 
 - App: a route tag sits at the right end of the input box: "LAN 105ms" or "WAN 85ms" (direct), "Relay" (no direct path, used the fallback address), "SSH" (no direct connection set up) or "Switching" (resuming on a new path). Tap it for the Route panel: details (including whether a drop resumes), and a choice to pin one route: the private network (LAN, office network, VPN) is often steadier at the office, peer to peer over the internet suits being out. A resumable connection moves to the new route without dropping SSH; when it finds no path in two tries it goes back to the old one. On relay, tapping the ticked route reconnects to try a direct path again.

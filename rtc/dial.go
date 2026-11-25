@@ -31,9 +31,19 @@ func dialMain(args []string) {
 	iceTimeout := fs.Duration("ice-timeout", 5*time.Second, "give up this try when no path answers this long (the app tries again at once)")
 	route := fs.String("route", "auto", "auto (first path that works), lan (private addresses only) or wan (public only)")
 	ctl := fs.String("ctl", "", "file the app touches to ask for a new path now (e.g. the network changed)")
+	via := fs.String("via", "", "go through the jump host of this name (see moor-rtc via)")
 	fs.Parse(args)
 	if *keyStr == "" {
 		*keyStr = os.Getenv("MOOR_RTC_KEY") // keeps the key off the command line
+	}
+	if *via != "" {
+		c, err := viaConfig(Config{Signal: *signal, Room: *roomID, Key: *keyStr}, *via)
+		if err != nil {
+			logf("route none: %v", err)
+			os.Exit(1)
+		}
+		*roomID, *keyStr = c.Room, c.Key
+		logf("via %s", *via)
 	}
 	useBuiltinDNS()
 	androidNetwork()

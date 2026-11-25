@@ -95,6 +95,19 @@ func loadConfig(path string) (Config, error) {
 	return c, nil
 }
 
+// viaConfig is the room and key of a jump host named name: another machine that answers the phone and
+// connects channels on to this machine's sshd (e.g. one with a steadier path to it). Both come from this
+// machine's key, so the phone needs no new pairing, while the jump host holds only its own key: one taken
+// from it can't stand in for this machine. SSH inside is still checked against this machine's host key.
+func viaConfig(c Config, name string) (Config, error) {
+	key, err := decodeKey(c.Key)
+	if err != nil {
+		return c, err
+	}
+	room := mac(key, "via-room", name)[:22]
+	return Config{Signal: c.Signal, Room: room, Key: mac(key, "via-key", name)}, nil
+}
+
 func decodeKey(k string) ([]byte, error) {
 	b, err := base64.RawURLEncoding.DecodeString(k)
 	if err != nil || len(b) < 16 {

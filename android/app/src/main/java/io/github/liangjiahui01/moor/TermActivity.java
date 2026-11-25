@@ -356,6 +356,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         } else if ("relay".equals(p.route)) {
             text = getString(R.string.chip_relay);
             color = t.amber;
+        } else if (p.jump && !p.path.isEmpty()) {
+            String name = getString(R.string.chip_jump);
+            text = p.rttMs > 0 ? getString(R.string.chip_rtt, name, p.rttMs + Math.max(p.upMs, 0)) : name;
+            color = t.ok;
         } else if (!p.path.isEmpty()) {
             boolean lan = "lan".equals(p.path);
             String name = getString(lan ? R.string.chip_lan : R.string.chip_wan);
@@ -389,6 +393,10 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         if (p == null) return getString(R.string.chip_ssh_detail);
         if ("relay".equals(p.route)) return getString(R.string.chip_relay_detail) + "\n" + getString(R.string.chip_relay_retry);
         if (p.path.isEmpty()) return getString(R.string.route_now_none);
+        if (p.jump) {
+            String path = p.rttMs > 0 && p.upMs > 0 ? getString(R.string.chip_jump_detail, p.rttMs, p.upMs) : getString(R.string.chip_jump);
+            return path + "\n" + getString(p.resumable ? R.string.chip_resumable : R.string.chip_not_resumable);
+        }
         String path = getString("lan".equals(p.path) ? R.string.chip_lan_detail : R.string.chip_wan_detail);
         if (p.rttMs > 0) path += " · " + p.rttMs + " ms";
         return path + "\n" + getString(p.resumable ? R.string.chip_resumable : R.string.chip_not_resumable);
@@ -1116,9 +1124,9 @@ public class TermActivity extends Activity implements TerminalViewClient, Termin
         refreshToggles();
     }
 
-    private static final String[] ROUTES = {"auto", "lan", "wan"};
-    private static final int[] ROUTE_LABELS = {R.string.route_auto, R.string.route_lan, R.string.route_wan};
-    private static final int[] ROUTE_HINTS = {R.string.route_auto_hint, R.string.route_lan_hint, R.string.route_wan_hint};
+    private static final String[] ROUTES = {"auto", "lan", "wan", Rtc.JUMP};
+    private static final int[] ROUTE_LABELS = {R.string.route_auto, R.string.route_lan, R.string.route_wan, R.string.route_jump};
+    private static final int[] ROUTE_HINTS = {R.string.route_auto_hint, R.string.route_lan_hint, R.string.route_wan_hint, R.string.route_jump_hint};
 
     /** Which path a direct connection takes: first that works, company/home network, or the internet. */
     private void showRoute() {
